@@ -1,3 +1,32 @@
+export interface TrackInfo {
+  title: string;
+  artist: string;
+  bpm: number;
+  key: string;
+  duration: number;
+  sampleRate: number;
+}
+
+export interface AudioServiceCallbacks {
+  onTrackStart?: (track: TrackInfo) => void;
+  onTrackEnd?: () => void;
+  onQueueEmpty?: () => void;
+  onError?: (message: string) => void;
+}
+
+// Audio queue item tagged with track ID
+interface QueuedAudio {
+  buffer: AudioBuffer;
+  trackId: number;
+}
+
+// Pending track transition
+interface PendingTransition {
+  trackId: number;
+  startTime: number; // AudioContext time when this track's audio starts
+  trackInfo: TrackInfo;
+}
+
 export class AudioStreamService {
   private ws: WebSocket | null = null;
   private isConnected: boolean = false;
@@ -6,11 +35,38 @@ export class AudioStreamService {
   
   // Web Audio API components
   private audioContext: AudioContext | null = null;
+  private analyserNode: AnalyserNode | null = null;
   private sampleRate: number = 44100;
-  private audioQueue: AudioBuffer[] = [];
   private isPlaying: boolean = false;
   private currentSource: AudioBufferSourceNode | null = null;
   private nextStartTime: number = 0;
+  
+  // Audio queue with track ID tags
+  private audioQueue: QueuedAudio[] = [];
+  
+  // Track ID system - increments with each track_start
+  private currentStreamingTrackId: number = 0;
+  private currentPlayingTrackId: number = 0;
+  
+  // Track info management
+  private currentTrack: TrackInfo | null = null;
+  private trackInfoMap: Map<number, TrackInfo> = new Map(); // trackId -> TrackInfo
+  
+  // Pending transitions - scheduled to trigger at specific audio times
+  private pendingTransitions: PendingTransition[] = [];
+  private transitionCheckInterval: number | null = null;
+  
+  // Callbacks
+  private callbacks: AudioServiceCallbacks = {};
+  
+  // Synchronization flags
+  private queueEmptyReceived: boolean = false;
+  private allTracksStreamingComplete: boolean = false;
+  private playbackCheckInterval: number | null = null;
+
+  setCallbacks(callbacks: AudioServiceCallbacks) {
+    this.callbacks = callbacks;
+  }
 
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -76,7 +132,14 @@ export class AudioStreamService {
   private initAudioContext() {
     if (!this.audioContext) {
       this.audioContext = new AudioContext();
-      console.log('🎵 Audio context initialized');
+      
+      // Create analyser node for visualization
+      this.analyserNode = this.audioContext.createAnalyser();
+      this.analyserNode.fftSize = 256;
+      this.analyserNode.smoothingTimeConstant = 0.8;
+      this.analyserNode.connect(this.audioContext.destination);
+      
+      console.log('🎵 Audio context and analyser initialized');
     }
   }
 
@@ -85,17 +148,56 @@ export class AudioStreamService {
     
     switch (message.type) {
       case 'track_start':
-        console.log('🎵 Track starting:', message.track.title);
+        console.log('🎵 Track info received:', message.track.title);
         this.sampleRate = message.track.sample_rate || 44100;
-        this.startPlayback();
+        
+        // Increment track ID for this new track
+        this.currentStreamingTrackId++;
+        const trackId = this.currentStreamingTrackId;
+        
+        // Create track info object
+        const newTrackInfo: TrackInfo = {
+          title: message.track.title || 'Unknown',
+          artist: message.track.artist || 'Unknown Artist',
+          bpm: message.track.bpm,
+          key: message.track.key,
+          duration: message.track.duration,
+          sampleRate: this.sampleRate
+        };
+        
+        // Store track info
+        this.trackInfoMap.set(trackId, newTrackInfo);
+        
+        // If we're not currently playing anything, this is the first track
+        if (!this.isPlaying || !this.currentTrack) {
+          console.log('🎵 Setting as current track (first/only track), trackId:', trackId);
+          this.currentTrack = newTrackInfo;
+          this.currentPlayingTrackId = trackId;
+          this.queueEmptyReceived = false;
+          this.allTracksStreamingComplete = false;
+          
+          this.startPlayback();
+          this.startTransitionMonitor();
+          
+          // Trigger callback
+          if (this.callbacks.onTrackStart) {
+            this.callbacks.onTrackStart(this.currentTrack);
+          }
+        } else {
+          console.log('🎵 Track info stored for later, trackId:', trackId, 'title:', newTrackInfo.title);
+        }
         break;
       
       case 'track_end':
-        console.log('✅ Track finished');
+        console.log('✅ Backend finished streaming track');
         break;
       
       case 'queue_empty':
-        console.log('📭 Queue is empty');
+        console.log('📭 Backend queue is empty - all tracks streamed');
+        this.queueEmptyReceived = true;
+        this.allTracksStreamingComplete = true;
+        // Start monitoring for final playback completion
+        this.startPlaybackMonitor();
         break;
       
       case 'queued':
@@ -104,10 +206,102 @@ export class AudioStreamService {
       
       case 'error':
         console.error('❌ Server error:', message.message);
+        if (this.callbacks.onError) {
+          this.callbacks.onError(message.message);
+        }
         break;
       
       default:
         console.log('Received:', message);
+    }
+  }
+
+  private startTransitionMonitor() {
+    // Clear any existing monitor
+    if (this.transitionCheckInterval !== null) {
+      clearInterval(this.transitionCheckInterval);
+    }
+    
+    // Check every 50ms if any pending transitions should trigger
+    this.transitionCheckInterval = window.setInterval(() => {
+      this.checkPendingTransitions();
+    }, 50);
+  }
+
+  private checkPendingTransitions() {
+    if (!this.audioContext || this.pendingTransitions.length === 0) return;
+    
+    const currentTime = this.audioContext.currentTime;
+    
+    // Check if any pending transitions should trigger
+    while (this.pendingTransitions.length > 0) {
+      const nextTransition = this.pendingTransitions[0];
+      
+      // If it's time (or past time) for this transition
+      if (currentTime >= nextTransition.startTime - 0.02) { // Small buffer for timing
+        this.pendingTransitions.shift();
+        this.executeTrackTransition(nextTransition);
+      } else {
+        // Not time yet for the next transition
+        break;
+      }
+    }
+  }
+
+  private executeTrackTransition(transition: PendingTransition) {
+    console.log('🎵 Executing track transition to trackId:', transition.trackId, 'title:', transition.trackInfo.title);
+    
+    this.currentTrack = transition.trackInfo;
+    this.currentPlayingTrackId = transition.trackId;
+    
+    // Trigger track start callback
+    if (this.callbacks.onTrackStart) {
+      this.callbacks.onTrackStart(this.currentTrack);
+    }
+  }
+
+  private startPlaybackMonitor() {
+    // Clear any existing monitor
+    if (this.playbackCheckInterval !== null) {
+      clearInterval(this.playbackCheckInterval);
+    }
+    
+    // Check every 100ms if all playback has finished
+    this.playbackCheckInterval = window.setInterval(() => {
+      this.checkFinalPlaybackCompletion();
+    }, 100);
+  }
+
+  private checkFinalPlaybackCompletion() {
+    if (!this.audioContext) return;
+    
+    const currentTime = this.audioContext.currentTime;
+    const isStillPlaying = currentTime < this.nextStartTime - 0.05;
+    
+    // Check if ALL playback is truly finished
+    if (this.allTracksStreamingComplete && this.audioQueue.length === 0 && !isStillPlaying && this.pendingTransitions.length === 0) {
+      console.log('🎵 All playback finished - exiting music mode');
+      
+      // Clear monitors
+      if (this.playbackCheckInterval !== null) {
+        clearInterval(this.playbackCheckInterval);
+        this.playbackCheckInterval = null;
+      }
+      if (this.transitionCheckInterval !== null) {
+        clearInterval(this.transitionCheckInterval);
+        this.transitionCheckInterval = null;
+      }
+      
+      this.currentTrack = null;
+      this.isPlaying = false;
+      
+      if (this.callbacks.onTrackEnd) {
+        this.callbacks.onTrackEnd();
+      }
+      
+      if (this.callbacks.onQueueEmpty) {
+        this.callbacks.onQueueEmpty();
+      }
     }
   }
 
@@ -124,8 +318,14 @@ export class AudioStreamService {
       // Convert int16 PCM data to AudioBuffer
       const audioBuffer = this.int16ToAudioBuffer(arrayBuffer);
       
-      // Add to queue and play
-      this.audioQueue.push(audioBuffer);
+      // Create queue item tagged with current streaming track ID
+      const queueItem: QueuedAudio = {
+        buffer: audioBuffer,
+        trackId: this.currentStreamingTrackId
+      };
+      
+      // Add to queue
+      this.audioQueue.push(queueItem);
       this.scheduleNextBuffer();
       
     } catch (error) {
@@ -138,19 +338,16 @@ export class AudioStreamService {
       throw new Error('Audio context not initialized');
     }
 
-    // Create DataView to read int16 data
     const dataView = new DataView(arrayBuffer);
-    const numSamples = arrayBuffer.byteLength / 4; // 2 bytes per sample * 2 channels
+    const numSamples = arrayBuffer.byteLength / 4;
     
-    // Create audio buffer (stereo)
     const audioBuffer = this.audioContext.createBuffer(2, numSamples, this.sampleRate);
     
     const leftChannel = audioBuffer.getChannelData(0);
     const rightChannel = audioBuffer.getChannelData(1);
     
-    // Convert int16 to float32 (-1 to 1)
     for (let i = 0; i < numSamples; i++) {
-      const offset = i * 4; // 4 bytes per stereo sample
+      const offset = i * 4;
       leftChannel[i] = dataView.getInt16(offset, true) / 32768.0;
       rightChannel[i] = dataView.getInt16(offset + 2, true) / 32768.0;
     }
@@ -171,22 +368,48 @@ export class AudioStreamService {
       return;
     }
 
-    const audioBuffer = this.audioQueue.shift()!;
+    // Get next audio item
+    const audioItem = this.audioQueue.shift()!;
+    const audioBuffer = audioItem.buffer;
+    const bufferTrackId = audioItem.trackId;
     
-    // Create buffer source
+    // Calculate when this buffer will start playing
+    const startTime = Math.max(this.nextStartTime, this.audioContext.currentTime);
+    
+    // Check if this buffer belongs to a different track than currently playing
+    if (bufferTrackId !== this.currentPlayingTrackId) {
+      // Schedule a transition to happen when this buffer starts playing
+      const trackInfo = this.trackInfoMap.get(bufferTrackId);
+      if (trackInfo) {
+        // Check if we already have a pending transition for this track
+        const existingTransition = this.pendingTransitions.find(t => t.trackId === bufferTrackId);
+        if (!existingTransition) {
+          console.log('🎵 Scheduling track transition to trackId:', bufferTrackId, 'at time:', startTime.toFixed(2));
+          this.pendingTransitions.push({
+            trackId: bufferTrackId,
+            startTime: startTime,
+            trackInfo: trackInfo
+          });
+        }
+      }
+    }
+    
     const source = this.audioContext.createBufferSource();
     source.buffer = audioBuffer;
-    source.connect(this.audioContext.destination);
     
-    // Schedule playback
-    const startTime = Math.max(this.nextStartTime, this.audioContext.currentTime);
+    if (this.analyserNode) {
+      source.connect(this.analyserNode);
+    } else {
+      source.connect(this.audioContext.destination);
+    }
+    
     source.start(startTime);
     
-    // Update next start time
     this.nextStartTime = startTime + audioBuffer.duration;
     
-    // Clean up when finished
+    // Set up onended callback
     source.onended = () => {
+      // Continue scheduling more buffers
       if (this.audioQueue.length > 0) {
         this.scheduleNextBuffer();
       }
@@ -198,6 +421,22 @@ export class AudioStreamService {
   private stopPlayback() {
     this.isPlaying = false;
     this.audioQueue = [];
+    this.currentTrack = null;
+    this.trackInfoMap.clear();
+    this.pendingTransitions = [];
+    this.queueEmptyReceived = false;
+    this.allTracksStreamingComplete = false;
+    this.currentStreamingTrackId = 0;
+    this.currentPlayingTrackId = 0;
+    
+    if (this.playbackCheckInterval !== null) {
+      clearInterval(this.playbackCheckInterval);
+      this.playbackCheckInterval = null;
+    }
+    if (this.transitionCheckInterval !== null) {
+      clearInterval(this.transitionCheckInterval);
+      this.transitionCheckInterval = null;
+    }
     
     if (this.currentSource) {
       try {
@@ -225,12 +464,29 @@ export class AudioStreamService {
     return this.isConnected;
   }
 
+  getAnalyserNode(): AnalyserNode | null {
+    return this.analyserNode;
+  }
+
+  getCurrentTrack(): TrackInfo | null {
+    return this.currentTrack;
+  }
+
+  getIsPlaying(): boolean {
+    return this.isPlaying;
+  }
+  
+  getQueueLength(): number {
+    return this.pendingTransitions.length;
+  }
+
   disconnect() {
     this.stopPlayback();
     
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
+      this.analyserNode = null;
     }
     
     if (this.ws) {
