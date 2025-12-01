@@ -31,7 +31,11 @@ export default function Home() {
         setCurrentTrack(track);
         setIsPlaying(true);
         setLoading(false);
-        // Clear transitioning state when new track fully starts
+        // Clear transition info when new track's audio actually starts playing
+        // This is the correct time to hide transition UI (not when backend sends transition_complete)
+        // The backend's transition_complete arrives when streaming finishes, but there's still
+        // buffered audio to play through. This callback fires when the audio actually starts.
+        setPendingTransition(null);
         setIsTransitioning(false);
       },
       onTrackEnd: () => {
@@ -53,7 +57,7 @@ export default function Home() {
       onTransitionPlanned: (transition) => {
         console.log('Transition planned:', transition);
         setPendingTransition(transition);
-        setIsTransitioning(false);
+        // Don't change isTransitioning here - it should stay false until transition_start
       },
       onTransitionStart: (transition) => {
         console.log('Transition starting:', transition);
@@ -61,9 +65,12 @@ export default function Home() {
         setIsTransitioning(true);
       },
       onTransitionComplete: (nowPlaying) => {
-        console.log('Transition complete, now playing:', nowPlaying);
-        setPendingTransition(null);
-        setIsTransitioning(false);
+        console.log('Transition complete (backend streaming finished), now playing:', nowPlaying);
+        // DON'T clear pendingTransition or isTransitioning here!
+        // The backend sends this when it finishes STREAMING the crossfade audio,
+        // but due to buffering, the frontend is still PLAYING the crossfade.
+        // The transition info should stay visible until onTrackStart fires,
+        // which happens when the new track's audio actually begins playing.
       }
     });
 
