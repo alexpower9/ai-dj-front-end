@@ -7,11 +7,24 @@ export interface TrackInfo {
   sampleRate: number;
 }
 
+export interface TransitionInfo {
+  songA: string;
+  songB: string;
+  exitSegment: string;
+  entrySegment: string;
+  score: number;
+  transitionStartTime: number;
+  crossfadeDuration: number;
+}
+
 export interface AudioServiceCallbacks {
   onTrackStart?: (track: TrackInfo) => void;
   onTrackEnd?: () => void;
   onQueueEmpty?: () => void;
   onError?: (message: string) => void;
+  onTransitionPlanned?: (transition: TransitionInfo) => void;
+  onTransitionStart?: (transition: TransitionInfo) => void;
+  onTransitionComplete?: (nowPlaying: string) => void;
 }
 
 // Audio queue item tagged with track ID
@@ -51,6 +64,10 @@ export class AudioStreamService {
   // Track info management
   private currentTrack: TrackInfo | null = null;
   private trackInfoMap: Map<number, TrackInfo> = new Map(); // trackId -> TrackInfo
+  
+  // Transition info
+  private pendingTransitionInfo: TransitionInfo | null = null;
+  private isTransitioning: boolean = false;
   
   // Pending transitions - scheduled to trigger at specific audio times
   private pendingTransitions: PendingTransition[] = [];
@@ -196,12 +213,41 @@ export class AudioStreamService {
         console.log('📭 Backend queue is empty - all tracks streamed');
         this.queueEmptyReceived = true;
         this.allTracksStreamingComplete = true;
+        // Clear pending transition info when queue is done
+        this.pendingTransitionInfo = null;
         // Start monitoring for final playback completion
         this.startPlaybackMonitor();
         break;
       
       case 'queued':
         console.log('➕ Song queued:', message.message);
+        break;
+      
+      // NEW: Transition messages
+      case 'transition_planned':
+        console.log('🎛️ Transition planned:', message.transition);
+        this.pendingTransitionInfo = this.parseTransitionInfo(message.transition);
+        if (this.callbacks.onTransitionPlanned && this.pendingTransitionInfo) {
+          this.callbacks.onTransitionPlanned(this.pendingTransitionInfo);
+        }
+        break;
+      
+      case 'transition_start':
+        console.log('🎛️ Transition starting:', message.transition);
+        this.isTransitioning = true;
+        const transitionInfo = this.parseTransitionInfo(message.transition);
+        if (this.callbacks.onTransitionStart && transitionInfo) {
+          this.callbacks.onTransitionStart(transitionInfo);
+        }
+        break;
+      
+      case 'transition_complete':
+        console.log('🎛️ Transition complete, now playing:', message.now_playing?.title);
+        this.isTransitioning = false;
+        this.pendingTransitionInfo = null;
+        if (this.callbacks.onTransitionComplete) {
+          this.callbacks.onTransitionComplete(message.now_playing?.title || 'Unknown');
+        }
         break;
       
       case 'error':
@@ -214,6 +260,20 @@ export class AudioStreamService {
       default:
         console.log('Received:', message);
     }
+  }
+
+  private parseTransitionInfo(data: any): TransitionInfo | null {
+    if (!data) return null;
+    
+    return {
+      songA: data.song_a || data.songA || 'Current',
+      songB: data.song_b || data.songB || 'Next',
+      exitSegment: data.exit_segment || data.exitSegment || 'unknown',
+      entrySegment: data.entry_segment || data.entrySegment || 'unknown',
+      score: data.score || 0,
+      transitionStartTime: data.transition_start_time || data.transitionStartTime || 0,
+      crossfadeDuration: data.crossfade_duration || data.crossfadeDuration || 8,
+    };
   }
 
   private startTransitionMonitor() {
@@ -253,6 +313,9 @@ export class AudioStreamService {
     
     this.currentTrack = transition.trackInfo;
     this.currentPlayingTrackId = transition.trackId;
+    
+    // Clear transition info after transition completes
+    this.pendingTransitionInfo = null;
     
     // Trigger track start callback
     if (this.callbacks.onTrackStart) {
@@ -294,6 +357,7 @@ export class AudioStreamService {
       
       this.currentTrack = null;
       this.isPlaying = false;
+      this.pendingTransitionInfo = null;
       
       if (this.callbacks.onTrackEnd) {
         this.callbacks.onTrackEnd();
@@ -424,6 +488,8 @@ export class AudioStreamService {
     this.currentTrack = null;
     this.trackInfoMap.clear();
     this.pendingTransitions = [];
+    this.pendingTransitionInfo = null;
+    this.isTransitioning = false;
     this.queueEmptyReceived = false;
     this.allTracksStreamingComplete = false;
     this.currentStreamingTrackId = 0;
@@ -474,6 +540,14 @@ export class AudioStreamService {
 
   getIsPlaying(): boolean {
     return this.isPlaying;
+  }
+  
+  getPendingTransition(): TransitionInfo | null {
+    return this.pendingTransitionInfo;
+  }
+  
+  getIsTransitioning(): boolean {
+    return this.isTransitioning;
   }
   
   getQueueLength(): number {
