@@ -1,8 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import PromptBox from '../components/PromptBox';
-import Waveform from '../components/Waveform.tsx';
-import TrackInfo from '../components/TrackInfo.tsx';
-import { AudioStreamService, type TrackInfo as TrackInfoType } from '../services/audioStream';
+import Waveform from '../components/Waveform';
+import TrackInfo from '../components/TrackInfo';
+import TransitionInfo from '../components/TransitionInfo.tsx';
+import { 
+  AudioStreamService, 
+  type TrackInfo as TrackInfoType,
+  type TransitionInfo as TransitionInfoType 
+} from '../services/audioStream';
 
 export default function Home() {
   const [audioService] = useState(() => new AudioStreamService());
@@ -13,6 +18,10 @@ export default function Home() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  
+  // Transition state
+  const [pendingTransition, setPendingTransition] = useState<TransitionInfoType | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
 
   useEffect(() => {
     // Set up audio service callbacks
@@ -22,6 +31,8 @@ export default function Home() {
         setCurrentTrack(track);
         setIsPlaying(true);
         setLoading(false);
+        // Clear transitioning state when new track fully starts
+        setIsTransitioning(false);
       },
       onTrackEnd: () => {
         console.log('Track ended');
@@ -31,10 +42,28 @@ export default function Home() {
         console.log('Queue empty - exiting music mode');
         setIsPlaying(false);
         setCurrentTrack(null);
+        setPendingTransition(null);
+        setIsTransitioning(false);
       },
       onError: (message) => {
         console.error('Audio error:', message);
         setLoading(false);
+      },
+      // Transition callbacks
+      onTransitionPlanned: (transition) => {
+        console.log('Transition planned:', transition);
+        setPendingTransition(transition);
+        setIsTransitioning(false);
+      },
+      onTransitionStart: (transition) => {
+        console.log('Transition starting:', transition);
+        setPendingTransition(transition);
+        setIsTransitioning(true);
+      },
+      onTransitionComplete: (nowPlaying) => {
+        console.log('Transition complete, now playing:', nowPlaying);
+        setPendingTransition(null);
+        setIsTransitioning(false);
       }
     });
 
@@ -93,6 +122,10 @@ export default function Home() {
         {isPlaying && (
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-neon-cyan/10 rounded-full blur-3xl animate-pulse" />
         )}
+        {/* Extra glow during transition */}
+        {isTransitioning && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-neon-cyan/20 rounded-full blur-3xl animate-pulse" />
+        )}
       </div>
 
       {/* Main content wrapper with flex layout */}
@@ -140,7 +173,15 @@ export default function Home() {
               : 'opacity-0 scale-95 absolute pointer-events-none'
           }`}
         >
-          {/* Track info at top */}
+          {/* Transition info at the very top - shows upcoming mix */}
+          <div className="w-full max-w-md mb-6">
+            <TransitionInfo 
+              transition={pendingTransition} 
+              isTransitioning={isTransitioning} 
+            />
+          </div>
+          
+          {/* Track info */}
           <div className="mb-8">
             <TrackInfo track={currentTrack} />
           </div>
@@ -168,7 +209,9 @@ export default function Home() {
           {/* Hint text when playing */}
           {isPlaying && (
             <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
-              Request another song or add to the queue
+              {pendingTransition 
+                ? 'Transition queued! Ask for another song to queue more'
+                : 'Request another song to mix it in'}
             </p>
           )}
         </div>
