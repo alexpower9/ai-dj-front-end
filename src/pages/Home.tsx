@@ -38,9 +38,20 @@ export default function Home() {
         // Clear transition info when new track's audio actually starts playing
         setPendingTransition(null);
         setIsTransitioning(false);
-        // Clear queued track since it's now playing
-        setQueuedTrack(null);
-      },
+        // Only clear queued track if the starting track IS the queued track
+        // This prevents clearing auto-queued tracks that were just set
+        setQueuedTrack((prevQueuedTrack) => {
+          if (prevQueuedTrack && 
+              prevQueuedTrack.title.toLowerCase() === track.title.toLowerCase()) {
+            // The queued track is now playing, clear it
+            console.log('🎵 Clearing queuedTrack - now playing:', track.title);
+            return null;
+          }
+          // Keep the queued track (it's for the NEXT song, not this one)
+          console.log('🎵 Keeping queuedTrack for next song:', prevQueuedTrack?.title);
+          return prevQueuedTrack;
+        });
+      }, 
       onTrackEnd: () => {
         console.log('Track ended');
         // Don't immediately exit music mode - wait for queue_empty

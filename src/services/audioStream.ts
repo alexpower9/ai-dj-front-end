@@ -294,8 +294,13 @@ export class AudioStreamService {
         console.log('🎛️ Transition complete, now playing:', message.now_playing?.title);
         this.isTransitioning = false;
         this.pendingTransitionInfo = null;
-        // Clear queued track since it's now playing
-        this.updateQueuedTrack(null);
+        // Only clear queued track if it matches the track that just started playing
+        // The backend may send a new auto_queued message right after this
+        if (this.queuedTrack && 
+            message.now_playing?.title &&
+            this.queuedTrack.title.toLowerCase() === message.now_playing.title.toLowerCase()) {
+          this.updateQueuedTrack(null);
+        }
         if (this.callbacks.onTransitionComplete) {
           this.callbacks.onTransitionComplete(message.now_playing?.title || 'Unknown');
         }
@@ -367,8 +372,13 @@ export class AudioStreamService {
     
     // Clear transition info after transition completes
     this.pendingTransitionInfo = null;
-    // Clear queued track since it's now the current track
-    this.updateQueuedTrack(null);
+    
+    // Only clear queued track if it matches the track that just started
+    // This preserves auto-queued tracks for the NEXT transition
+    if (this.queuedTrack && 
+        this.queuedTrack.title.toLowerCase() === transition.trackInfo.title.toLowerCase()) {
+      this.updateQueuedTrack(null);
+    }
     
     // Trigger track start callback
     if (this.callbacks.onTrackStart) {
