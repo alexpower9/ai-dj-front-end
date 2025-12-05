@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import PromptBox from '../components/PromptBox';
 import Waveform from '../components/Waveform';
 import TrackInfo from '../components/TrackInfo';
-import TransitionInfo from '../components/TransitionInfo.tsx';
+import TransitionInfo from '../components/TransitionInfo';
+import AutoplayIndicator, { type QueuedTrackInfo } from '../components/AutoplayIndicator';
 import { 
   AudioStreamService, 
   type TrackInfo as TrackInfoType,
@@ -22,6 +23,9 @@ export default function Home() {
   // Transition state
   const [pendingTransition, setPendingTransition] = useState<TransitionInfoType | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  
+  // Queued track state (for autoplay indicator)
+  const [queuedTrack, setQueuedTrack] = useState<QueuedTrackInfo | null>(null);
 
   useEffect(() => {
     // Set up audio service callbacks
@@ -32,11 +36,10 @@ export default function Home() {
         setIsPlaying(true);
         setLoading(false);
         // Clear transition info when new track's audio actually starts playing
-        // This is the correct time to hide transition UI (not when backend sends transition_complete)
-        // The backend's transition_complete arrives when streaming finishes, but there's still
-        // buffered audio to play through. This callback fires when the audio actually starts.
         setPendingTransition(null);
         setIsTransitioning(false);
+        // Clear queued track since it's now playing
+        setQueuedTrack(null);
       },
       onTrackEnd: () => {
         console.log('Track ended');
@@ -48,6 +51,7 @@ export default function Home() {
         setCurrentTrack(null);
         setPendingTransition(null);
         setIsTransitioning(false);
+        setQueuedTrack(null);
       },
       onError: (message) => {
         console.error('Audio error:', message);
@@ -57,7 +61,6 @@ export default function Home() {
       onTransitionPlanned: (transition) => {
         console.log('Transition planned:', transition);
         setPendingTransition(transition);
-        // Don't change isTransitioning here - it should stay false until transition_start
       },
       onTransitionStart: (transition) => {
         console.log('Transition starting:', transition);
@@ -69,8 +72,12 @@ export default function Home() {
         // DON'T clear pendingTransition or isTransitioning here!
         // The backend sends this when it finishes STREAMING the crossfade audio,
         // but due to buffering, the frontend is still PLAYING the crossfade.
-        // The transition info should stay visible until onTrackStart fires,
-        // which happens when the new track's audio actually begins playing.
+        // The transition info should stay visible until onTrackStart fires.
+      },
+      // Queued track callback (for autoplay indicator)
+      onQueuedTrackUpdate: (track) => {
+        console.log('Queued track update:', track);
+        setQueuedTrack(track);
       }
     });
 
@@ -197,6 +204,14 @@ export default function Home() {
           <div className="w-full max-w-2xl px-4">
             <Waveform analyserNode={analyserNode} isPlaying={isPlaying} />
           </div>
+          
+          {/* Autoplay indicator - shows below waveform when no transition is planned */}
+          <div className="mt-4">
+            <AutoplayIndicator 
+              queuedTrack={queuedTrack} 
+              isTransitioning={isTransitioning} 
+            />
+          </div>
         </div>
         
         {/* Prompt box - transitions to bottom when playing */}
@@ -218,7 +233,9 @@ export default function Home() {
             <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
               {pendingTransition 
                 ? 'Transition queued! Ask for another song to queue more'
-                : 'Request another song to mix it in'}
+                : queuedTrack
+                  ? 'Song queued! Request another or let autoplay continue'
+                  : 'Request another song to mix it in'}
             </p>
           )}
         </div>
