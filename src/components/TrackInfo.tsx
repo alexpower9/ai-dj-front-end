@@ -1,38 +1,54 @@
+// src/components/TrackInfo.tsx
+import React from 'react';
 import type { TrackInfo as TrackInfoType } from '../services/audioStream';
 
-interface TrackInfoProps {
+type Props = {
   track: TrackInfoType | null;
+};
+
+// Helper: if the string is ALL CAPS, convert to Title Case.
+// Otherwise, leave it exactly as-is.
+function formatTitle(raw: string): string {
+  if (!raw) return '';
+
+  const isAllCaps = raw === raw.toUpperCase();
+  if (!isAllCaps) return raw;
+
+  return raw
+    .toLowerCase()
+    .split(' ')
+    .map(word =>
+      word.length === 0
+        ? word
+        : word[0].toUpperCase() + word.slice(1)
+    )
+    .join(' ');
 }
 
-export default function TrackInfo({ track }: TrackInfoProps) {
+export default function TrackInfo({ track }: Props) {
   if (!track) return null;
 
+  const displayTitle = formatTitle(track.title);
+  const displayArtist = formatTitle(track.artist);
+
   return (
-    <div className="text-center space-y-2 animate-fade-in">
-      <h2 className="text-4xl md:text-5xl font-display font-bold bg-gradient-music bg-clip-text text-transparent">
-        {track.title}
-      </h2>
-      
-      <p className="text-xl text-gray-300 font-medium">
-        {track.artist}
+    <div className="text-center space-y-2">
+      {/* Title – slightly smaller than before */}
+      <h1 className="text-4xl md:text-5xl lg:text-5xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
+        {displayTitle}
+      </h1>
+
+      {/* Artist */}
+      <p className="text-sm md:text-base text-slate-200/90">
+        {displayArtist}
       </p>
-      
-      {(track.bpm || track.key) && (
-        <div className="flex items-center justify-center gap-4 text-sm text-gray-500 mt-3">
-          {track.bpm && (
-            <span className="flex items-center gap-1.5">
-              <span className="text-primary-400">♪</span>
-              {Math.round(track.bpm)} BPM
-            </span>
-          )}
-          {track.key && (
-            <span className="flex items-center gap-1.5">
-              <span className="text-secondary-400">♯</span>
-              {track.key}
-            </span>
-          )}
-        </div>
-      )}
+
+      {/* Meta row */}
+      <div className="mt-1 flex items-center justify-center gap-3 text-xs md:text-sm text-slate-400">
+        <span>♪ {Math.round(track.bpm)} BPM</span>
+        <span>•</span>
+        <span>{track.key}</span>
+      </div>
     </div>
   );
 }

@@ -1,0 +1,70 @@
+.timeline-container {
+  width: 80%;
+  margin: 1.5rem auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    sans-serif;
+}
+
+.timeline-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  color: #cbd5f5;
+}
+
+.timeline-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.timeline-track {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at top, #2b2b5a, #141326);
+}
+
+.timeline-progress {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: linear-gradient(90deg, #8b5cf6, #38bdf8);
+  transition: width 0.15s linear;
+}
+
+.timeline-beat-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  pointer-events: none;
+}
+
+.timeline-transition-marker {
+  position: absolute;
+  top: -4px;
+  height: 18px;
+  width: 2px;
+  background: #f97316;
+  box-shadow: 0 0 6px rgba(249, 115, 22, 0.8);
+  pointer-events: none;
+}
+
+.timeline-handle {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.9);
+  pointer-events: none;
+}
