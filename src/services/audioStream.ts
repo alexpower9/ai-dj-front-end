@@ -7,20 +7,28 @@ export interface TrackInfo {
   sampleRate: number;
 }
 
+<<<<<<< HEAD
 export interface QueuedTrackInfo {
   title: string;
   artist: string;
   isAutoQueued: boolean;
 }
 
+=======
+// Match backend TransitionPlan.to_dict() keys
+>>>>>>> feature/sebupdate
 export interface TransitionInfo {
-  songA: string;
-  songB: string;
-  exitSegment: string;
-  entrySegment: string;
+  song_a: string;
+  song_b: string;
+  exit_segment: string;
+  entry_segment: string;
   score: number;
-  transitionStartTime: number;
-  crossfadeDuration: number;
+  crossfade_duration: number;
+  transition_start_time: number;
+  song_b_start_offset: number;
+
+  // optional alias the backend sometimes sends
+  start_time?: number;
 }
 
 export interface AudioServiceCallbacks {
@@ -107,7 +115,7 @@ export class AudioStreamService {
       this.ws = new WebSocket('ws://localhost:8000/api/ws/audio');
 
       this.ws.onopen = () => {
-        console.log('✅ webSocket connected successfully');
+        console.log(' webSocket connected successfully');
         this.isConnected = true;
         this.reconnectAttempts = 0;
         
@@ -129,7 +137,7 @@ export class AudioStreamService {
       };
 
       this.ws.onerror = (error) => {
-        console.error('❌ WebSocket error:', error);
+        console.error(' WebSocket error:', error);
         this.isConnected = false;
         reject(error);
       };
@@ -322,13 +330,22 @@ export class AudioStreamService {
     if (!data) return null;
     
     return {
-      songA: data.song_a || data.songA || 'Current',
-      songB: data.song_b || data.songB || 'Next',
-      exitSegment: data.exit_segment || data.exitSegment || 'unknown',
-      entrySegment: data.entry_segment || data.entrySegment || 'unknown',
-      score: data.score || 0,
-      transitionStartTime: data.transition_start_time || data.transitionStartTime || 0,
-      crossfadeDuration: data.crossfade_duration || data.crossfadeDuration || 8,
+      song_a: data.song_a || data.songA || 'Current',
+      song_b: data.song_b || data.songB || 'Next',
+      exit_segment: data.exit_segment || data.exitSegment || 'unknown',
+      entry_segment: data.entry_segment || data.entrySegment || 'unknown',
+      score: data.score ?? 0,
+      crossfade_duration: data.crossfade_duration ?? data.crossfadeDuration ?? 8,
+      transition_start_time:
+        data.transition_start_time ??
+        data.transitionStartTime ??
+        data.start_time ??
+        0,
+      song_b_start_offset:
+        data.song_b_start_offset ??
+        data.songBStartOffset ??
+        0,
+      start_time: data.start_time,
     };
   }
 
@@ -578,15 +595,15 @@ export class AudioStreamService {
       this.currentSource = null;
     }
     
-    console.log('⏹️ Playback stopped');
+    console.log('⏹ Playback stopped');
   }
 
   sendPrompt(prompt: string) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'prompt', data: prompt }));
-      console.log('📤 Sent prompt:', prompt);
+      console.log(' Sent prompt:', prompt);
     } else {
-      console.error('❌ Cannot send - WebSocket is not connected');
+      console.error(' Cannot send - WebSocket is not connected');
       throw new Error('WebSocket is not connected');
     }
   }

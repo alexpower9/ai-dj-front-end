@@ -1,115 +1,89 @@
+import React from 'react';
 import type { TransitionInfo as TransitionInfoType } from '../services/audioStream';
 
-interface TransitionInfoProps {
+type Props = {
   transition: TransitionInfoType | null;
   isTransitioning: boolean;
+};
+
+function formatSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '';
+  const s = Math.max(0, Math.round(seconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, '0')}`;
 }
 
-// Format segment names for display (e.g., "cool-down" -> "Cool Down")
-function formatSegmentName(segment: string): string {
-  return segment
-    .split('-')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-export default function TransitionInfo({ transition, isTransitioning }: TransitionInfoProps) {
+export default function TransitionInfo({ transition, isTransitioning }: Props) {
   if (!transition) return null;
 
+  // These keys come directly from TransitionPlan.to_dict() in Python
+  const nextTrackName = transition.song_b || 'Next track';
+  const exitLabel = transition.exit_segment || 'Current section';
+  const entryLabel = transition.entry_segment || 'Next section';
+  const matchScore = Number.isFinite(transition.score)
+    ? transition.score.toFixed(1)
+    : '–';
+
+  // We added both "transition_start_time" and "start_time" in Python.
+  // Prefer start_time if present, otherwise use transition_start_time.
+  const startTime =
+    typeof transition.start_time === 'number'
+      ? transition.start_time
+      : transition.transition_start_time;
+
+  const startTimeLabel =
+    typeof startTime === 'number' ? formatSeconds(startTime) : '';
+
   return (
-    <div className="animate-fade-in">
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary-900/40 via-secondary-900/40 to-primary-900/40 border border-primary-500/30 backdrop-blur-sm p-4">
-        {/* Animated background effect */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className={`absolute inset-0 bg-gradient-to-r from-primary-500/10 via-neon-cyan/10 to-primary-500/10 ${
-            isTransitioning ? 'animate-pulse' : ''
-          }`} />
-          {isTransitioning && (
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer" />
-          )}
+    <div className="mx-auto w-full max-w-md rounded-3xl bg-surface/60 backdrop-blur-xl border border-white/10 shadow-2xl px-8 py-6 text-center space-y-3">
+      <p className="text-xs tracking-[0.35em] text-slate-400 uppercase">
+        Up Next
+      </p>
+
+      <h2 className="text-xl font-semibold text-white">
+        {nextTrackName}
+      </h2>
+
+      <div className="mt-3 flex items-center justify-center gap-8 text-xs uppercase tracking-[0.2em] text-slate-400">
+        <div className="space-y-1">
+          <div className="text-[0.6rem] text-slate-500">Exit</div>
+          <div className="text-[0.7rem] text-slate-200">
+            {exitLabel}
+          </div>
         </div>
-        
-        <div className="relative z-10">
-          {/* Header */}
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <div className={`w-2 h-2 rounded-full ${
-              isTransitioning 
-                ? 'bg-neon-cyan animate-pulse' 
-                : 'bg-primary-400'
-            }`} />
-            <span className={`text-xs font-semibold uppercase tracking-wider ${
-              isTransitioning 
-                ? 'text-neon-cyan' 
-                : 'text-primary-300'
-            }`}>
-              {isTransitioning ? 'Mixing Now' : 'Up Next'}
-            </span>
+
+        <div className="h-10 w-px bg-white/10" />
+
+        <div className="space-y-1">
+          <div className="text-[0.6rem] text-slate-500">Entry</div>
+          <div className="text-[0.7rem] text-slate-200">
+            {entryLabel}
           </div>
-          
-          {/* Next song title */}
-          <h3 className="text-xl font-display font-bold text-white text-center mb-3">
-            {transition.songB}
-          </h3>
-          
-          {/* Transition visualization */}
-          <div className="flex items-center justify-center gap-3">
-            {/* Exit segment */}
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Exit</span>
-              <div className="px-3 py-1.5 rounded-lg bg-primary-600/30 border border-primary-500/40">
-                <span className="text-sm font-medium text-primary-200">
-                  {formatSegmentName(transition.exitSegment)}
-                </span>
-              </div>
-            </div>
-            
-            {/* Arrow with animation */}
-            <div className="flex items-center gap-1 py-4">
-              <div className={`w-8 h-0.5 bg-gradient-to-r from-primary-500 to-neon-cyan ${
-                isTransitioning ? 'animate-pulse' : ''
-              }`} />
-              <svg 
-                className={`w-4 h-4 text-neon-cyan ${isTransitioning ? 'animate-pulse' : ''}`} 
-                fill="none" 
-                viewBox="0 0 24 24" 
-                stroke="currentColor"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-            
-            {/* Entry segment */}
-            <div className="flex flex-col items-center">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">Entry</span>
-              <div className="px-3 py-1.5 rounded-lg bg-secondary-600/30 border border-secondary-500/40">
-                <span className="text-sm font-medium text-secondary-200">
-                  {formatSegmentName(transition.entrySegment)}
-                </span>
-              </div>
-            </div>
+        </div>
+
+        <div className="h-10 w-px bg-white/10" />
+
+        <div className="space-y-1">
+          <div className="text-[0.6rem] text-slate-500">Match</div>
+          <div className="text-[0.8rem] text-neon-cyan font-semibold">
+            {matchScore}
           </div>
-          
-          {/* Score indicator */}
-          {transition.score > 0 && (
-            <div className="flex items-center justify-center gap-2 mt-3">
-              <span className="text-[10px] text-gray-500 uppercase tracking-wide">Match</span>
-              <div className="flex items-center gap-1">
-                {[...Array(5)].map((_, i) => (
-                  <div
-                    key={i}
-                    className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                      i < Math.round(transition.score / 2)
-                        ? 'bg-neon-cyan'
-                        : 'bg-gray-600'
-                    }`}
-                  />
-                ))}
-              </div>
-              <span className="text-xs text-gray-400">{transition.score.toFixed(1)}</span>
-            </div>
-          )}
         </div>
       </div>
+
+      {startTimeLabel && (
+        <p className="text-[0.7rem] text-slate-400 mt-2">
+          AI will start the mix around{' '}
+          <span className="text-slate-200">{startTimeLabel}</span>
+        </p>
+      )}
+
+      {isTransitioning && (
+        <p className="text-[0.7rem] text-neon-cyan/80 mt-1">
+          Transition in progress…
+        </p>
+      )}
     </div>
   );
 }
