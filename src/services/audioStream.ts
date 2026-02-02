@@ -7,16 +7,7 @@ export interface TrackInfo {
   sampleRate: number;
 }
 
-<<<<<<< HEAD
-export interface QueuedTrackInfo {
-  title: string;
-  artist: string;
-  isAutoQueued: boolean;
-}
-
-=======
 // Match backend TransitionPlan.to_dict() keys
->>>>>>> feature/sebupdate
 export interface TransitionInfo {
   song_a: string;
   song_b: string;
@@ -39,7 +30,6 @@ export interface AudioServiceCallbacks {
   onTransitionPlanned?: (transition: TransitionInfo) => void;
   onTransitionStart?: (transition: TransitionInfo) => void;
   onTransitionComplete?: (nowPlaying: string) => void;
-  onQueuedTrackUpdate?: (track: QueuedTrackInfo | null) => void;
 }
 
 // Audio queue item tagged with track ID
@@ -79,9 +69,6 @@ export class AudioStreamService {
   // Track info management
   private currentTrack: TrackInfo | null = null;
   private trackInfoMap: Map<number, TrackInfo> = new Map(); // trackId -> TrackInfo
-  
-  // Queued track info (for autoplay indicator)
-  private queuedTrack: QueuedTrackInfo | null = null;
   
   // Transition info
   private pendingTransitionInfo: TransitionInfo | null = null;
@@ -178,16 +165,9 @@ export class AudioStreamService {
     }
   }
 
-  private updateQueuedTrack(track: QueuedTrackInfo | null) {
-    this.queuedTrack = track;
-    if (this.callbacks.onQueuedTrackUpdate) {
-      this.callbacks.onQueuedTrackUpdate(track);
-    }
-  }
-
   private handleJsonMessage(message: any) {
     console.log('📨 Received JSON:', message);
-    console.log('📨 Message type:', message.type); 
+    
     switch (message.type) {
       case 'track_start':
         console.log('🎵 Track info received:', message.track.title);
@@ -238,52 +218,20 @@ export class AudioStreamService {
         console.log('📭 Backend queue is empty - all tracks streamed');
         this.queueEmptyReceived = true;
         this.allTracksStreamingComplete = true;
-        // Clear pending transition info and queued track when queue is done
+        // Clear pending transition info when queue is done
         this.pendingTransitionInfo = null;
-        this.updateQueuedTrack(null);
         // Start monitoring for final playback completion
         this.startPlaybackMonitor();
         break;
       
       case 'queued':
         console.log('➕ Song queued:', message.message);
-        // Update queued track info from user request
-        if (message.queue?.queue?.[0]) {
-          const queuedInfo = message.queue.queue[0];
-          this.updateQueuedTrack({
-            title: queuedInfo.title || 'Unknown',
-            artist: queuedInfo.artist || 'Unknown Artist',
-            isAutoQueued: queuedInfo.is_auto_queued || false
-          });
-        }
         break;
       
-      // Auto-queued track notification
-      case 'auto_queued':
-        console.log('✨ Auto-queued:', message.track?.title);
-        if (message.track) {
-          this.updateQueuedTrack({
-            title: message.track.title || 'Unknown',
-            artist: message.track.artist || 'Unknown Artist',
-            isAutoQueued: true
-          });
-        }
-        break;
-      
-      // Transition messages
+      // NEW: Transition messages
       case 'transition_planned':
         console.log('🎛️ Transition planned:', message.transition);
         this.pendingTransitionInfo = this.parseTransitionInfo(message.transition);
-        
-        // Update queued track from transition info if we have next_track data
-        if (message.next_track) {
-          this.updateQueuedTrack({
-            title: message.next_track.title || message.transition?.song_b || 'Unknown',
-            artist: message.next_track.artist || 'Unknown Artist',
-            isAutoQueued: message.next_track.is_auto_queued || false
-          });
-        }
-        
         if (this.callbacks.onTransitionPlanned && this.pendingTransitionInfo) {
           this.callbacks.onTransitionPlanned(this.pendingTransitionInfo);
         }
@@ -302,13 +250,6 @@ export class AudioStreamService {
         console.log('🎛️ Transition complete, now playing:', message.now_playing?.title);
         this.isTransitioning = false;
         this.pendingTransitionInfo = null;
-        // Only clear queued track if it matches the track that just started playing
-        // The backend may send a new auto_queued message right after this
-        if (this.queuedTrack && 
-            message.now_playing?.title &&
-            this.queuedTrack.title.toLowerCase() === message.now_playing.title.toLowerCase()) {
-          this.updateQueuedTrack(null);
-        }
         if (this.callbacks.onTransitionComplete) {
           this.callbacks.onTransitionComplete(message.now_playing?.title || 'Unknown');
         }
@@ -390,13 +331,6 @@ export class AudioStreamService {
     // Clear transition info after transition completes
     this.pendingTransitionInfo = null;
     
-    // Only clear queued track if it matches the track that just started
-    // This preserves auto-queued tracks for the NEXT transition
-    if (this.queuedTrack && 
-        this.queuedTrack.title.toLowerCase() === transition.trackInfo.title.toLowerCase()) {
-      this.updateQueuedTrack(null);
-    }
-    
     // Trigger track start callback
     if (this.callbacks.onTrackStart) {
       this.callbacks.onTrackStart(this.currentTrack);
@@ -438,7 +372,6 @@ export class AudioStreamService {
       this.currentTrack = null;
       this.isPlaying = false;
       this.pendingTransitionInfo = null;
-      this.updateQueuedTrack(null);
       
       if (this.callbacks.onTrackEnd) {
         this.callbacks.onTrackEnd();
@@ -570,7 +503,6 @@ export class AudioStreamService {
     this.trackInfoMap.clear();
     this.pendingTransitions = [];
     this.pendingTransitionInfo = null;
-    this.queuedTrack = null;
     this.isTransitioning = false;
     this.queueEmptyReceived = false;
     this.allTracksStreamingComplete = false;
@@ -630,10 +562,6 @@ export class AudioStreamService {
   
   getIsTransitioning(): boolean {
     return this.isTransitioning;
-  }
-  
-  getQueuedTrack(): QueuedTrackInfo | null {
-    return this.queuedTrack;
   }
   
   getQueueLength(): number {

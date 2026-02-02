@@ -4,17 +4,10 @@ import Waveform from '../components/Waveform';
 import PlaybackTimeline from '../components/PlaybackTimeline';
 import QueuePanel from '../components/QueuePanel';
 import TrackInfo from '../components/TrackInfo';
-<<<<<<< HEAD
-import TransitionInfo from '../components/TransitionInfo';
-import AutoplayIndicator, { type QueuedTrackInfo } from '../components/AutoplayIndicator';
-import { 
-  AudioStreamService, 
-=======
 import TransitionInfo from '../components/TransitionInfo.tsx';
 import TransitionMenu from '../components/TransitionMenu';
 import {
   AudioStreamService,
->>>>>>> feature/sebupdate
   type TrackInfo as TrackInfoType,
   type TransitionInfo as TransitionInfoType,
 } from '../services/audioStream';
@@ -41,9 +34,6 @@ export default function Home() {
   const [pendingTransition, setPendingTransition] =
     useState<TransitionInfoType | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
-  
-  // Queued track state (for autoplay indicator)
-  const [queuedTrack, setQueuedTrack] = useState<QueuedTrackInfo | null>(null);
 
   // Music time / progress
   const [currentTime, setCurrentTime] = useState(0); // seconds
@@ -82,25 +72,6 @@ export default function Home() {
         setCurrentTrack(track);
         setIsPlaying(true);
         setLoading(false);
-<<<<<<< HEAD
-        // Clear transition info when new track's audio actually starts playing
-        setPendingTransition(null);
-        setIsTransitioning(false);
-        // Only clear queued track if the starting track IS the queued track
-        // This prevents clearing auto-queued tracks that were just set
-        setQueuedTrack((prevQueuedTrack) => {
-          if (prevQueuedTrack && 
-              prevQueuedTrack.title.toLowerCase() === track.title.toLowerCase()) {
-            // The queued track is now playing, clear it
-            console.log('🎵 Clearing queuedTrack - now playing:', track.title);
-            return null;
-          }
-          // Keep the queued track (it's for the NEXT song, not this one)
-          console.log('🎵 Keeping queuedTrack for next song:', prevQueuedTrack?.title);
-          return prevQueuedTrack;
-        });
-      }, 
-=======
 
         // reset progress
         setCurrentTime(0);
@@ -123,7 +94,6 @@ export default function Home() {
         setIsTransitioning(false);
         setUpNext([]);
       },
->>>>>>> feature/sebupdate
       onTrackEnd: () => {
         console.log('Track ended');
         // wait for queue_empty before fully exiting
@@ -134,14 +104,10 @@ export default function Home() {
         setCurrentTrack(null);
         setPendingTransition(null);
         setIsTransitioning(false);
-<<<<<<< HEAD
-        setQueuedTrack(null);
-=======
         setCurrentTime(0);
         setDuration(0);
         setTransitionPoints([]);
         setUpNext([]);
->>>>>>> feature/sebupdate
       },
       onError: (message) => {
         console.error('Audio error:', message);
@@ -151,8 +117,6 @@ export default function Home() {
       onTransitionPlanned: (transition) => {
         console.log('Transition planned:', transition);
         setPendingTransition(transition);
-<<<<<<< HEAD
-=======
 
         // Try to pull a \"next\" track from transition payload
         const tr: any = transition as any;
@@ -161,7 +125,6 @@ export default function Home() {
         if (nextTrack) {
           setUpNext([nextTrack]);
         }
->>>>>>> feature/sebupdate
       },
       onTransitionStart: (transition) => {
         console.log('Transition starting:', transition);
@@ -169,26 +132,12 @@ export default function Home() {
         setIsTransitioning(true);
       },
       onTransitionComplete: (nowPlaying) => {
-<<<<<<< HEAD
-        console.log('Transition complete (backend streaming finished), now playing:', nowPlaying);
-        // DON'T clear pendingTransition or isTransitioning here!
-        // The backend sends this when it finishes STREAMING the crossfade audio,
-        // but due to buffering, the frontend is still PLAYING the crossfade.
-        // The transition info should stay visible until onTrackStart fires.
-      },
-      // Queued track callback (for autoplay indicator)
-      onQueuedTrackUpdate: (track) => {
-        console.log('Queued track update:', track);
-        setQueuedTrack(track);
-      }
-=======
         console.log(
           'Transition complete (backend streaming finished), now playing:',
           nowPlaying,
         );
         // don't clear here; onTrackStart will clean it up
       },
->>>>>>> feature/sebupdate
     });
 
     // Connect when component mounts
@@ -330,14 +279,6 @@ export default function Home() {
           <div className="w-full max-w-2xl px-4">
             <Waveform analyserNode={analyserNode} isPlaying={isPlaying} />
           </div>
-<<<<<<< HEAD
-          
-          {/* Autoplay indicator - shows below waveform when no transition is planned */}
-          <div className="mt-4">
-            <AutoplayIndicator 
-              queuedTrack={queuedTrack} 
-              isTransitioning={isTransitioning} 
-=======
 
           {/* Playback timeline under the waveform */}
           <div className="w-full max-w-2xl px-4 mt-6">
@@ -354,7 +295,6 @@ export default function Home() {
               currentTrack={currentTrack}
               previousTrack={previousTrack}
               upNext={upNext}
->>>>>>> feature/sebupdate
             />
           </div>
         </div>
@@ -375,9 +315,7 @@ export default function Home() {
             <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
               {pendingTransition
                 ? 'Transition queued! Ask for another song to queue more'
-                : queuedTrack
-                  ? 'Song queued! Request another or let autoplay continue'
-                  : 'Request another song to mix it in'}
+                : 'Request another song to mix it in'}
             </p>
           )}
         </div>
