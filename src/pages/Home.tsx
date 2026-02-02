@@ -11,6 +11,8 @@ import {
   type TrackInfo as TrackInfoType,
   type TransitionInfo as TransitionInfoType,
 } from '../services/audioStream';
+import { Upload } from 'lucide-react';
+import SongUpload from '../components/SongUpload';
 
 export default function Home() {
   const [audioService] = useState(() => new AudioStreamService());
@@ -18,6 +20,9 @@ export default function Home() {
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected'
   >('connecting');
+
+  //Upload Song State
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   // Music mode state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -183,6 +188,37 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      
+      {/* ← ADD UPLOAD BUTTON */}
+      <button
+        onClick={() => setShowUploadModal(true)}
+        className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+      >
+        <Upload className="w-4 h-4" />
+        Upload Song
+      </button>
+
+      {/* ← ADD UPLOAD MODAL */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="relative">
+            <button
+              onClick={() => setShowUploadModal(false)}
+              className="absolute -top-12 right-0 text-white text-2xl hover:text-gray-300"
+            >
+              ✕ Close
+            </button>
+            <SongUpload
+              onUploadComplete={(filename) => {
+                console.log('Uploaded:', filename);
+                setShowUploadModal(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+
       {/* Background effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div
