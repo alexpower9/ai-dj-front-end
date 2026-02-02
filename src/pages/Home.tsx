@@ -199,6 +199,16 @@ export default function Home() {
       </button>
 
       {/* ← ADD UPLOAD MODAL */}
+      {/* ← ADD UPLOAD BUTTON */}
+      <button
+        onClick={() => setShowUploadModal(true)}
+        className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+      >
+        <Upload className="w-4 h-4" />
+        Upload Song
+      </button>
+
+      {/* ← ADD UPLOAD MODAL */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="relative">
@@ -217,6 +227,7 @@ export default function Home() {
           </div>
         </div>
       )}
+
 
 
       {/* Background effects */}

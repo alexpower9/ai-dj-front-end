@@ -140,7 +140,7 @@ export default function SongUpload({ onUploadComplete }: SongUploadProps) {
   const isValidFormat = artist && title;
 
   return (
-    <div className="w-full max-w-2xl mx-auto p-6 bg-gray-800/50 backdrop-blur-sm rounded-2xl border border-gray-700">
+    <div className="w-full max-w-2xl mx-auto p-6 bg-gray-800/50 backdrop-blur-sm rounded-2xl border border-gray-700 relative">
       <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
         <Music className="w-6 h-6" />
         Upload New Song
