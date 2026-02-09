@@ -66,7 +66,7 @@ export default function QueuePanel({ currentTrack, previousTrack, upNext }: Prop
         {upNext[0] && (
           <div className="space-y-0.5 pt-1 border-t border-white/5 mt-2">
             <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-              Up Next
+              Queued Up
             </p>
             <p className="text-sm font-medium text-slate-100 leading-snug">
               {formatTitle(upNext[0].title)}

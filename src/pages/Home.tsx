@@ -4,8 +4,7 @@ import Waveform from '../components/Waveform';
 import PlaybackTimeline from '../components/PlaybackTimeline';
 import QueuePanel from '../components/QueuePanel';
 import TrackInfo from '../components/TrackInfo';
-import TransitionInfo from '../components/TransitionInfo.tsx';
-import TransitionMenu from '../components/TransitionMenu';
+import TransitionInfo from '../components/TransitionInfo';
 import {
   AudioStreamService,
   type TrackInfo as TrackInfoType,
@@ -49,6 +48,9 @@ export default function Home() {
   const [previousTrack, setPreviousTrack] =
     useState<TrackInfoType | null>(null);
   const [upNext, setUpNext] = useState<TrackInfoType[]>([]);
+
+  const trackKey = (t: TrackInfoType | null) =>
+    t ? `${t.title ?? ''}::${t.artist ?? ''}` : '';
 
   // Simple timer to simulate playback progress while a track is playing
   useEffect(() => {
@@ -97,7 +99,9 @@ export default function Home() {
         // Clear transition info when new track's audio actually starts
         setPendingTransition(null);
         setIsTransitioning(false);
-        setUpNext([]);
+
+        // Keep the queued list, but remove the track that just started (so the queue represents "up next")
+        setUpNext((prev) => prev.filter((t) => trackKey(t) !== trackKey(track)));
       },
       onTrackEnd: () => {
         console.log('Track ended');
@@ -114,6 +118,21 @@ export default function Home() {
         setTransitionPoints([]);
         setUpNext([]);
       },
+      onQueueUpdate: (queue: any) => {
+        // Backend-authoritative “Up Next” list
+        // Be resilient to different shapes coming from the service (array or object payload).
+        const upcoming = Array.isArray(queue)
+          ? queue
+          : Array.isArray(queue?.upcoming)
+          ? queue.upcoming
+          : Array.isArray(queue?.upNext)
+          ? queue.upNext
+          : Array.isArray(queue?.queue)
+          ? queue.queue
+          : [];
+
+        setUpNext(upcoming);
+      },
       onError: (message) => {
         console.error('Audio error:', message);
         setLoading(false);
@@ -122,14 +141,6 @@ export default function Home() {
       onTransitionPlanned: (transition) => {
         console.log('Transition planned:', transition);
         setPendingTransition(transition);
-
-        // Try to pull a \"next\" track from transition payload
-        const tr: any = transition as any;
-        const nextTrack: TrackInfoType | null =
-          tr?.to_track ?? tr?.toTrack ?? tr?.nextTrack ?? null;
-        if (nextTrack) {
-          setUpNext([nextTrack]);
-        }
       },
       onTransitionStart: (transition) => {
         console.log('Transition starting:', transition);
@@ -252,120 +263,130 @@ export default function Home() {
         )}
       </div>
 
-      {/* Main content wrapper with flex layout */}
+      {/* Main content wrapper with responsive layout */}
       <div
-        className={`max-w-5xl w-full relative z-10 flex flex-col transition-all duration-700 ease-out ${
+        className={`max-w-6xl w-full relative z-10 flex transition-all duration-700 ease-out ${
           isPlaying
-            ? 'h-[calc(100vh-2rem)] justify-between py-8'
-            : 'justify-center space-y-8'
+            ? 'h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8'
+            : 'flex-col justify-center space-y-8'
         }`}
       >
-        {/* Welcome text - fades out when playing */}
+        {/* Left column */}
         <div
-          className={`text-center space-y-4 transition-all duration-500 ${
-            isPlaying
-              ? 'opacity-0 scale-95 absolute pointer-events-none'
-              : 'opacity-100 scale-100'
+          className={`flex-1 relative flex flex-col transition-all duration-700 ease-out ${
+            isPlaying ? 'justify-between' : 'justify-center'
           }`}
         >
-          <h1 className="text-7xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
-            Welcome To The Future of Music
-          </h1>
-          <p className="text-gray-300 text-lg font-medium">
-            Tell me what you want to hear, and I'll mix it for you!
-          </p>
-
-          {/* Connection status - only show when not playing */}
+          {/* Welcome text - fades out when playing */}
           <div
-            className={`flex items-center justify-center gap-2 text-sm transition-opacity duration-300 ${
-              isPlaying ? 'opacity-0' : 'opacity-100'
+            className={`text-center space-y-4 transition-all duration-500 ${
+              isPlaying
+                ? 'opacity-0 scale-95 absolute pointer-events-none'
+                : 'opacity-100 scale-100'
             }`}
           >
-            <div
-              className={`w-2 h-2 rounded-full ${
-                connectionStatus === 'connected'
-                  ? 'bg-green-500'
-                  : connectionStatus === 'connecting'
-                  ? 'bg-yellow-500 animate-pulse'
-                  : 'bg-red-500'
-              }`}
-            />
-            <span className="text-gray-400">
-              {connectionStatus === 'connected'
-                ? 'Connected'
-                : connectionStatus === 'connecting'
-                ? 'Connecting...'
-                : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-
-        {/* Music mode content - fades in when playing */}
-        <div
-          className={`flex-1 flex flex-col items-center justify-center transition-all duration-500 ${
-            isPlaying
-              ? 'opacity-100 scale-100'
-              : 'opacity-0 scale-95 absolute pointer-events-none'
-          }`}
-        >
-          
-          {/* Transition info at the very top - shows upcoming mix */}
-          <div className="w-full max-w-md mb-6">
-            <TransitionInfo
-              transition={pendingTransition}
-              isTransitioning={isTransitioning}
-            />
-          </div>
-
-          {/* Track info */}
-          <div className="mb-6">
-            <TrackInfo track={currentTrack} />
-          </div>
-
-          {/* Waveform */}
-          <div className="w-full max-w-2xl px-4">
-            <Waveform analyserNode={analyserNode} isPlaying={isPlaying} />
-          </div>
-
-          {/* Playback timeline under the waveform */}
-          <div className="w-full max-w-2xl px-4 mt-6">
-            <PlaybackTimeline
-              currentTime={currentTime}
-              duration={duration}
-              transitionPoints={transitionPoints}
-            />
-          </div>
-
-          {/* Queue panel shows previous / current / next */}
-          <div className="w-full max-w-2xl px-4 mt-6">
-            <QueuePanel
-              currentTrack={currentTrack}
-              previousTrack={previousTrack}
-              upNext={upNext}
-            />
-          </div>
-        </div>
-
-        {/* Prompt box - transitions to bottom when playing */}
-        <div
-          className={`w-full transition-all duration-700 ease-out ${
-            isPlaying ? 'mt-auto' : ''
-          }`}
-        >
-          <PromptBox
-            onSubmit={handleSubmit}
-            loading={loading}
-            disabled={connectionStatus !== 'connected'}
-          />
-
-          {isPlaying && (
-            <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
-              {pendingTransition
-                ? 'Transition queued! Ask for another song to queue more'
-                : 'Request another song to mix it in'}
+            <h1 className="text-7xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
+              Welcome To The Future of Music
+            </h1>
+            <p className="text-gray-300 text-lg font-medium">
+              Tell me what you want to hear, and I'll mix it for you!
             </p>
-          )}
+
+            {/* Connection status - only show when not playing */}
+            <div
+              className={`flex items-center justify-center gap-2 text-sm transition-opacity duration-300 ${
+                isPlaying ? 'opacity-0' : 'opacity-100'
+              }`}
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  connectionStatus === 'connected'
+                    ? 'bg-green-500'
+                    : connectionStatus === 'connecting'
+                    ? 'bg-yellow-500 animate-pulse'
+                    : 'bg-red-500'
+                }`}
+              />
+              <span className="text-gray-400">
+                {connectionStatus === 'connected'
+                  ? 'Connected'
+                  : connectionStatus === 'connecting'
+                  ? 'Connecting...'
+                  : 'Disconnected'}
+              </span>
+            </div>
+          </div>
+
+          {/* Music mode content - fades in when playing */}
+          <div
+            className={`flex-1 flex flex-col items-center justify-center transition-all duration-500 ${
+              isPlaying
+                ? 'opacity-100 scale-100'
+                : 'opacity-0 scale-95 absolute pointer-events-none'
+            }`}
+          >
+            {/* Transition info at the very top - shows upcoming mix */}
+            <div className="w-full max-w-md mb-6">
+              <TransitionInfo
+                transition={pendingTransition}
+                isTransitioning={isTransitioning}
+              />
+            </div>
+
+            {/* Track info */}
+            <div className="mb-6">
+              <TrackInfo track={currentTrack} />
+            </div>
+
+            {/* Waveform */}
+            <div className="w-full max-w-2xl px-4">
+              <Waveform analyserNode={analyserNode} isPlaying={isPlaying} />
+            </div>
+
+            {/* Playback timeline under the waveform */}
+            <div className="w-full max-w-2xl px-4 mt-6">
+              <PlaybackTimeline
+                currentTime={currentTime}
+                duration={duration}
+                transitionPoints={transitionPoints}
+              />
+            </div>
+          </div>
+
+          {/* Prompt box - transitions to bottom when playing */}
+          <div
+            className={`w-full transition-all duration-700 ease-out ${
+              isPlaying ? 'mt-auto' : ''
+            }`}
+          >
+            <PromptBox
+              onSubmit={handleSubmit}
+              loading={loading}
+              disabled={connectionStatus !== 'connected'}
+            />
+
+            {isPlaying && (
+              <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
+                {pendingTransition
+                  ? 'Transition queued! Ask for another song to queue more'
+                  : 'Request another song to mix it in'}
+              </p>
+            )}
+          </div>
         </div>
+
+        {/* Right column: full queue */}
+        {isPlaying && (
+          <aside className="w-full lg:w-[360px] flex-shrink-0">
+            <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4">
+              <QueuePanel
+                currentTrack={currentTrack}
+                previousTrack={previousTrack}
+                upNext={upNext}
+              />
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

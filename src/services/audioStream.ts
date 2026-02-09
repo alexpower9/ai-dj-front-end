@@ -26,6 +26,9 @@ export interface AudioServiceCallbacks {
   onTrackStart?: (track: TrackInfo) => void;
   onTrackEnd?: () => void;
   onQueueEmpty?: () => void;
+
+  onQueueUpdate?: (queue: TrackInfo[]) => void;
+  
   onError?: (message: string) => void;
   onTransitionPlanned?: (transition: TransitionInfo) => void;
   onTransitionStart?: (transition: TransitionInfo) => void;
@@ -117,10 +120,12 @@ export class AudioStreamService {
           // Handle JSON messages
           const message = JSON.parse(event.data);
           this.handleJsonMessage(message);
+          
         } else if (event.data instanceof Blob) {
           // Handle binary audio data
           await this.handleAudioData(event.data);
         }
+        
       };
 
       this.ws.onerror = (error) => {
@@ -227,7 +232,14 @@ export class AudioStreamService {
       case 'queued':
         console.log('➕ Song queued:', message.message);
         break;
-      
+            case 'queue_update':
+        console.log('📜 Queue update received:', message.queue);
+
+        if (this.callbacks.onQueueUpdate) {
+          const queue = Array.isArray(message.queue) ? message.queue : [];
+          this.callbacks.onQueueUpdate(queue);
+        }
+        break;
       // NEW: Transition messages
       case 'transition_planned':
         console.log('🎛️ Transition planned:', message.transition);
