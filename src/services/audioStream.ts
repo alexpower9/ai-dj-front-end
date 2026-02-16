@@ -85,7 +85,6 @@ export class AudioStreamService {
   private callbacks: AudioServiceCallbacks = {};
   
   // Synchronization flags
-  private queueEmptyReceived: boolean = false;
   private allTracksStreamingComplete: boolean = false;
   private playbackCheckInterval: number | null = null;
 
@@ -200,7 +199,6 @@ export class AudioStreamService {
           console.log('🎵 Setting as current track (first/only track), trackId:', trackId);
           this.currentTrack = newTrackInfo;
           this.currentPlayingTrackId = trackId;
-          this.queueEmptyReceived = false;
           this.allTracksStreamingComplete = false;
           
           this.startPlayback();
@@ -221,7 +219,6 @@ export class AudioStreamService {
       
       case 'queue_empty':
         console.log('📭 Backend queue is empty - all tracks streamed');
-        this.queueEmptyReceived = true;
         this.allTracksStreamingComplete = true;
         // Clear pending transition info when queue is done
         this.pendingTransitionInfo = null;
@@ -516,7 +513,6 @@ export class AudioStreamService {
     this.pendingTransitions = [];
     this.pendingTransitionInfo = null;
     this.isTransitioning = false;
-    this.queueEmptyReceived = false;
     this.allTracksStreamingComplete = false;
     this.currentStreamingTrackId = 0;
     this.currentPlayingTrackId = 0;

@@ -1,4 +1,3 @@
-import React from 'react';
 import type { TransitionInfo as TransitionInfoType } from '../services/audioStream';
 
 type Props = {

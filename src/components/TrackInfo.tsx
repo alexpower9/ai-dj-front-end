@@ -1,5 +1,4 @@
 // src/components/TrackInfo.tsx
-import React from 'react';
 import type { TrackInfo as TrackInfoType } from '../services/audioStream';
 
 type Props = {
