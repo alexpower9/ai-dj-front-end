@@ -13,9 +13,47 @@ import {
 import { Upload } from 'lucide-react';
 import SongUpload from '../components/SongUpload.tsx';
 
+type LibrarySong = {
+  id?: string;
+  title?: string;
+  artist?: string;
+  bpm?: number;
+  key?: string;
+  scale?: string;
+};
+
 export default function Home() {
   const [audioService] = useState(() => new AudioStreamService());
   const [loading, setLoading] = useState(false);
+
+  // Library state (songs available on the backend)
+  const [librarySongs, setLibrarySongs] = useState<LibrarySong[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+
+  const refreshLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    setLibraryError(null);
+    try {
+      const res = await fetch('http://localhost:8000/api/library');
+      if (!res.ok) throw new Error(`Library fetch failed: ${res.status}`);
+      const data: any = await res.json();
+      const songs = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.songs)
+        ? data.songs
+        : Array.isArray(data?.library)
+        ? data.library
+        : [];
+      setLibrarySongs(songs);
+    } catch (e: any) {
+      console.error('Failed to load library:', e);
+      setLibraryError(e?.message ?? 'Failed to load library');
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, []);
+
   const [connectionStatus, setConnectionStatus] = useState<
     'connecting' | 'connected' | 'disconnected'
   >('connecting');
@@ -69,6 +107,9 @@ export default function Home() {
   }, [isPlaying, duration]);
 
   useEffect(() => {
+    // Load library once on mount
+    refreshLibrary();
+
     // Set up audio service callbacks
     audioService.setCallbacks({
       onTrackStart: (track) => {
@@ -179,7 +220,7 @@ export default function Home() {
     return () => {
       audioService.disconnect();
     };
-  }, [audioService]);
+  }, [audioService, refreshLibrary]);
 
   const handleSubmit = useCallback(
     async (prompt: string) => {
@@ -223,6 +264,7 @@ export default function Home() {
                       onUploadComplete={(filename) => {
                         console.log('Uploaded:', filename);
                         setShowUploadModal(false);
+                        refreshLibrary();
                       }}
                     />
                 </div>
@@ -258,6 +300,70 @@ export default function Home() {
             : 'flex-col justify-center space-y-8'
         }`}
       >
+        {/* Left sidebar: Library */}
+        {isPlaying && (
+          <aside className="hidden lg:block w-[280px] flex-shrink-0">
+            <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-xs font-semibold tracking-widest text-gray-300">
+                  LIBRARY
+                </div>
+                <button
+                  type="button"
+                  onClick={refreshLibrary}
+                  className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                >
+                  {libraryLoading ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
+
+              {libraryError && (
+                <div className="text-xs text-red-300 mb-2 truncate">
+                  {libraryError}
+                </div>
+              )}
+
+              <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
+                {librarySongs.length === 0 && !libraryLoading ? (
+                  <div className="text-sm text-gray-500">No songs found.</div>
+                ) : (
+                  librarySongs.map((s: any, idx: number) => {
+                    const title = s?.title ?? s?.name ?? s?.song_name ?? s?.id ?? 'Untitled';
+                    const artist = s?.artist ?? '';
+                    const bpm = typeof s?.bpm === 'number' ? Math.round(s.bpm) : null;
+                    const key = s?.key ?? '';
+                    const scale = s?.scale ?? '';
+
+                    const prettyPrompt = artist
+                      ? `play ${title} by ${artist}`
+                      : `play ${title}`;
+
+                    const keyStr = `${key}${scale ? ` ${scale}` : ''}`.trim();
+
+                    return (
+                      <button
+                        key={s?.id ?? `${title}::${artist}::${idx}`}
+                        type="button"
+                        disabled={connectionStatus !== 'connected' || loading}
+                        onClick={() => handleSubmit(prettyPrompt)}
+                        className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
+                      >
+                        <div className="text-sm text-white/90 font-medium truncate">
+                          {title}
+                        </div>
+                        <div className="text-xs text-gray-400 truncate">
+                          {artist}
+                          {bpm ? ` • ${bpm} BPM` : ''}
+                          {keyStr ? ` • ${keyStr}` : ''}
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </aside>
+        )}
         {/* Left column */}
         <div
           className={`flex-1 relative flex flex-col transition-all duration-700 ease-out ${
