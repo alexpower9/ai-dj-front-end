@@ -35,7 +35,7 @@ export default function Home() {
     setLibraryLoading(true);
     setLibraryError(null);
     try {
-      const res = await fetch('http://localhost:8000/api/library');
+      const res = await fetch('/api/library');
       if (!res.ok) throw new Error(`Library fetch failed: ${res.status}`);
       const data: any = await res.json();
       const songs = Array.isArray(data)

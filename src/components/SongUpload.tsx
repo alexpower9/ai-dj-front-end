@@ -98,7 +98,7 @@ export default function SongUpload({ onUploadComplete }: SongUploadProps) {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('http://localhost:8000/api/upload/song', {
+      const response = await fetch('/api/upload/song', {
         method: 'POST',
         body: formData,
       });

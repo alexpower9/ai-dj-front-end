@@ -100,9 +100,9 @@ export class AudioStreamService {
         return;
       }
 
-      console.log('connecting to WebSocket...');
-      this.ws = new WebSocket('ws://localhost:8000/api/ws/audio');
-
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      this.ws = new WebSocket(`${protocol}//${host}/api/ws/audio`);
       this.ws.onopen = () => {
         console.log(' webSocket connected successfully');
         this.isConnected = true;
