@@ -476,6 +476,7 @@ export default function Home() {
                 currentTrack={currentTrack}
                 previousTrack={previousTrack}
                 upNext={upNext}
+                onReorder={(newOrder) => audioService.sendReorderQueue(newOrder)}
               />
             </div>
           </aside>

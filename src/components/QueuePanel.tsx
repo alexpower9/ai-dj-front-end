@@ -1,13 +1,31 @@
 // src/components/QueuePanel.tsx
+import { useState } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { GripVertical } from 'lucide-react';
 import type { TrackInfo as TrackInfoType } from '../services/audioStream';
 
 type Props = {
   currentTrack: TrackInfoType | null;
   previousTrack: TrackInfoType | null;
   upNext: TrackInfoType[];
+  onReorder: (newOrder: number[]) => void;
 };
 
-// SAME helper we used in TrackInfo.tsx
 function formatTitle(raw: string | undefined): string {
   if (!raw) return '';
   const isAllCaps = raw === raw.toUpperCase();
@@ -20,7 +38,93 @@ function formatTitle(raw: string | undefined): string {
     .join(' ');
 }
 
-export default function QueuePanel({ currentTrack, previousTrack, upNext }: Props) {
+function SortableQueueItem({ id, track, index }: { id: string; track: TrackInfoType; index: number }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center gap-2 rounded-lg px-2 py-1.5 ${
+        isDragging ? 'bg-white/10 shadow-lg' : 'hover:bg-white/5'
+      }`}
+    >
+      <button
+        className="flex-shrink-0 cursor-grab active:cursor-grabbing text-slate-500 hover:text-slate-300 touch-none"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={14} />
+      </button>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-slate-100 leading-snug truncate">
+          {formatTitle(track.title)}
+        </p>
+        <p className="text-[11px] text-slate-400 truncate">
+          {formatTitle(track.artist)}
+        </p>
+      </div>
+      <span className="flex-shrink-0 text-[10px] text-slate-500 tabular-nums">
+        {index + 1}
+      </span>
+    </div>
+  );
+}
+
+export default function QueuePanel({ currentTrack, previousTrack, upNext, onReorder }: Props) {
+  const [localUpNext, setLocalUpNext] = useState<TrackInfoType[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Use localUpNext during drag, otherwise use prop
+  const displayList = isDragging ? localUpNext : upNext;
+
+  // Generate stable IDs based on index (queue items don't have unique IDs)
+  const itemIds = displayList.map((_, i) => `queue-item-${i}`);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+    useSensor(KeyboardSensor),
+  );
+
+  function handleDragStart() {
+    setLocalUpNext([...upNext]);
+    setIsDragging(true);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setIsDragging(false);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = itemIds.indexOf(active.id as string);
+    const newIndex = itemIds.indexOf(over.id as string);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    // Compute the new order as original indices
+    const currentOrder = localUpNext.map((_, i) => i);
+    const reordered = arrayMove(currentOrder, oldIndex, newIndex);
+
+    // Optimistically update local state
+    setLocalUpNext(arrayMove(localUpNext, oldIndex, newIndex));
+
+    onReorder(reordered);
+  }
+
   if (!currentTrack && !previousTrack && upNext.length === 0) return null;
 
   return (
@@ -61,18 +165,31 @@ export default function QueuePanel({ currentTrack, previousTrack, upNext }: Prop
           </div>
         )}
 
-        {/* Up next (first only, optional) */}
-        {upNext[0] && (
-          <div className="space-y-0.5 pt-1 border-t border-white/5 mt-2">
-            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500">
-              Queued Up
+        {/* Up next — draggable list */}
+        {displayList.length > 0 && (
+          <div className="pt-1 border-t border-white/5 mt-2">
+            <p className="text-[10px] uppercase tracking-[0.2em] text-slate-500 mb-1.5">
+              Up Next
             </p>
-            <p className="text-sm font-medium text-slate-100 leading-snug">
-              {formatTitle(upNext[0].title)}
-            </p>
-            <p className="text-[11px] text-slate-400">
-              {formatTitle(upNext[0].artist)}
-            </p>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+                <div className="space-y-0.5">
+                  {displayList.map((track, i) => (
+                    <SortableQueueItem
+                      key={itemIds[i]}
+                      id={itemIds[i]}
+                      track={track}
+                      index={i}
+                    />
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
           </div>
         )}
       </div>
