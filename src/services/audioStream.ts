@@ -548,6 +548,12 @@ export class AudioStreamService {
     }
   }
 
+  sendReorderQueue(newOrder: number[]) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'reorder_queue', order: newOrder }));
+    }
+  }
+
   getConnectionStatus(): boolean {
     return this.isConnected;
   }
