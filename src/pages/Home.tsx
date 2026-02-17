@@ -162,22 +162,18 @@ export default function Home() {
         setUpNext([]);
       },
       onQueueUpdate: (queue: any) => {
-        // Backend-authoritative “Up Next” list
-        // Be resilient to different shapes coming from the service (array or object payload).
-        const upcoming = Array.isArray(queue)
-          ? queue
-          : Array.isArray(queue?.upcoming)
-          ? queue.upcoming
-          : Array.isArray(queue?.upNext)
-          ? queue.upNext
-          : Array.isArray(queue?.queue)
-          ? queue.queue
-          : [];
-
+        // The audioStream service now extracts the queue array for us
+        const upcoming = Array.isArray(queue) ? queue : [];
         setUpNext(upcoming);
+        // A queue update confirms the backend processed our prompt, so clear loading state
+        setLoading(false);
       },
       onError: (message) => {
         console.error('Audio error:', message);
+        setLoading(false);
+      },
+      onInfo: (_type, _message) => {
+        // Backend responded but no song was queued/played — clear the loading spinner
         setLoading(false);
       },
       // Transition callbacks
@@ -222,6 +218,8 @@ export default function Home() {
     };
   }, [audioService, refreshLibrary]);
 
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleSubmit = useCallback(
     async (prompt: string) => {
       if (connectionStatus !== 'connected') {
@@ -230,11 +228,20 @@ export default function Home() {
       }
 
       setLoading(true);
+
+      // Safety timeout: clear loading after 30s if no response clears it first
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.warn('Loading timeout reached — clearing loading state');
+        setLoading(false);
+      }, 30_000);
+
       try {
         audioService.sendPrompt(prompt);
       } catch (error) {
         console.error('Error sending prompt:', error);
         setLoading(false);
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       }
     },
     [connectionStatus, audioService],

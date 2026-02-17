@@ -30,6 +30,7 @@ export interface AudioServiceCallbacks {
   onQueueUpdate?: (queue: TrackInfo[]) => void;
   
   onError?: (message: string) => void;
+  onInfo?: (type: string, message: string) => void;
   onTransitionPlanned?: (transition: TransitionInfo) => void;
   onTransitionStart?: (transition: TransitionInfo) => void;
   onTransitionComplete?: (nowPlaying: string) => void;
@@ -229,12 +230,26 @@ export class AudioStreamService {
       case 'queued':
         console.log('➕ Song queued:', message.message);
         break;
-            case 'queue_update':
-        console.log('📜 Queue update received:', message.queue);
 
+      case 'auto_queued':
+      case 'queue_update':
+      case 'queue_snapshot':
+        console.log(`📜 ${message.type} received:`, message);
         if (this.callbacks.onQueueUpdate) {
-          const queue = Array.isArray(message.queue) ? message.queue : [];
-          this.callbacks.onQueueUpdate(queue);
+          // The backend sends the queue in several possible locations depending on
+          // the message type.  Try them all in priority order:
+          //   1. message.queue_status.queue  (from _queue_payload via app.py)
+          //   2. message.queue               (flat array from _queue_payload, or
+          //                                   status object from _notify_auto_queue)
+          //   3. message.queue.queue          (when message.queue is a status object)
+          //   4. message.upcoming             (alternate key from _queue_payload)
+          const raw =
+            (Array.isArray(message.queue_status?.queue) && message.queue_status.queue) ||
+            (Array.isArray(message.queue) && message.queue) ||
+            (Array.isArray(message.queue?.queue) && message.queue.queue) ||
+            (Array.isArray(message.upcoming) && message.upcoming) ||
+            [];
+          this.callbacks.onQueueUpdate(raw);
         }
         break;
       // NEW: Transition messages
@@ -270,9 +285,25 @@ export class AudioStreamService {
           this.callbacks.onError(message.message);
         }
         break;
-      
+
+      // Non-actionable responses from the backend (no song queued, no playback change)
+      case 'greeting':
+      case 'help':
+      case 'unknown':
+      case 'stopped':
+      case 'quick_transition_scheduled':
+        console.log(`ℹ️ Backend responded with ${message.type}:`, message.message);
+        if (this.callbacks.onInfo) {
+          this.callbacks.onInfo(message.type, message.message);
+        }
+        break;
+
       default:
         console.log('Received:', message);
+        // Treat any other unrecognised JSON message as a signal the backend is done
+        if (this.callbacks.onInfo) {
+          this.callbacks.onInfo(message.type, message.message);
+        }
     }
   }
 
