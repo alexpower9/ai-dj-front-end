@@ -10,7 +10,7 @@ import {
   type TrackInfo as TrackInfoType,
   type TransitionInfo as TransitionInfoType,
 } from '../services/audioStream';
-import { Upload, MicVocal, Mic, MicOff } from 'lucide-react';
+import { Upload, MicVocal, Mic, MicOff, ChevronLeft, ChevronRight } from 'lucide-react';
 import SongUpload from '../components/SongUpload.tsx';
 
 type LibrarySong = {
@@ -59,8 +59,11 @@ export default function Home() {
   >('connecting');
 
   //Upload Song State
-  const [showUploadModal, setShowUploadModal] = 
+  const [showUploadModal, setShowUploadModal] =
       useState(false);
+
+  // Library sidebar collapse state
+  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
 
 
   // Music mode state
@@ -73,7 +76,6 @@ export default function Home() {
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const speechSupported = !!SpeechRecognitionCtor;
   const recognitionRef = useRef<any>(null);
-  const voiceFinalRef = useRef<string>('');
   const [isListening, setIsListening] = useState(false);
   const [voicePreview, setVoicePreview] = useState('');
   const listeningRef = useRef(false);
@@ -468,7 +470,7 @@ export default function Home() {
 
       {/* Main content wrapper with responsive layout */}
       <div
-        className={`max-w-6xl w-full relative z-10 flex transition-all duration-700 ease-out ${
+        className={`max-w-screen-2xl w-full relative z-10 flex transition-all duration-700 ease-out ${
           isPlaying
             ? 'h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8'
             : 'flex-col justify-center space-y-8'
@@ -476,65 +478,94 @@ export default function Home() {
       >
         {/* Left sidebar: Library */}
         {isPlaying && (
-          <aside className="hidden lg:block w-[340px] xl:w-[360px] flex-shrink-0">
-            <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-xs font-semibold tracking-widest text-gray-300">
-                  LIBRARY
-                </div>
+          <aside
+            className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
+              isLibraryCollapsed ? 'w-10' : 'w-[340px] xl:w-[360px]'
+            }`}
+          >
+            <div className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? 'p-0' : 'p-4'}`}>
+              {isLibraryCollapsed ? (
+                /* Collapsed: just the expand button */
                 <button
                   type="button"
-                  onClick={refreshLibrary}
-                  className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
+                  onClick={() => setIsLibraryCollapsed(false)}
+                  className="w-full h-full flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
+                  title="Expand library"
                 >
-                  {libraryLoading ? 'Loading…' : 'Refresh'}
+                  <ChevronRight className="w-6 h-6" />
                 </button>
-              </div>
-
-              {libraryError && (
-                <div className="text-xs text-red-300 mb-2 truncate">
-                  {libraryError}
-                </div>
-              )}
-
-              <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
-                {librarySongs.length === 0 && !libraryLoading ? (
-                  <div className="text-sm text-gray-500">No songs found.</div>
-                ) : (
-                  librarySongs.map((s: any, idx: number) => {
-                    const title = s?.title ?? s?.name ?? s?.song_name ?? s?.id ?? 'Untitled';
-                    const artist = s?.artist ?? '';
-                    const bpm = typeof s?.bpm === 'number' ? Math.round(s.bpm) : null;
-                    const key = s?.key ?? '';
-                    const scale = s?.scale ?? '';
-
-                    const prettyPrompt = artist
-                      ? `play ${title} by ${artist}`
-                      : `play ${title}`;
-
-                    const keyStr = `${key}${scale ? ` ${scale}` : ''}`.trim();
-
-                    return (
+              ) : (
+                /* Expanded: full panel */
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-semibold tracking-widest text-gray-300">
+                      LIBRARY
+                    </div>
+                    <div className="flex items-center gap-2">
                       <button
-                        key={s?.id ?? `${title}::${artist}::${idx}`}
                         type="button"
-                        disabled={connectionStatus !== 'connected' || loading}
-                        onClick={() => handleSubmit(prettyPrompt)}
-                        className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
+                        onClick={refreshLibrary}
+                        className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
                       >
-                        <div className="text-sm text-white/90 font-medium truncate">
-                          {title}
-                        </div>
-                        <div className="text-xs text-gray-400 truncate">
-                          {artist}
-                          {bpm ? ` • ${bpm} BPM` : ''}
-                          {keyStr ? ` • ${keyStr}` : ''}
-                        </div>
+                        {libraryLoading ? 'Loading…' : 'Refresh'}
                       </button>
-                    );
-                  })
-                )}
-              </div>
+                      <button
+                        type="button"
+                        onClick={() => setIsLibraryCollapsed(true)}
+                        className="text-gray-400 hover:text-gray-200 transition-colors"
+                        title="Collapse library"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {libraryError && (
+                    <div className="text-xs text-red-300 mb-2 truncate">
+                      {libraryError}
+                    </div>
+                  )}
+
+                  <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
+                    {librarySongs.length === 0 && !libraryLoading ? (
+                      <div className="text-sm text-gray-500">No songs found.</div>
+                    ) : (
+                      librarySongs.map((s: any, idx: number) => {
+                        const title = s?.title ?? s?.name ?? s?.song_name ?? s?.id ?? 'Untitled';
+                        const artist = s?.artist ?? '';
+                        const bpm = typeof s?.bpm === 'number' ? Math.round(s.bpm) : null;
+                        const key = s?.key ?? '';
+                        const scale = s?.scale ?? '';
+
+                        const prettyPrompt = artist
+                          ? `play ${title} by ${artist}`
+                          : `play ${title}`;
+
+                        const keyStr = `${key}${scale ? ` ${scale}` : ''}`.trim();
+
+                        return (
+                          <button
+                            key={s?.id ?? `${title}::${artist}::${idx}`}
+                            type="button"
+                            disabled={connectionStatus !== 'connected' || loading}
+                            onClick={() => handleSubmit(prettyPrompt)}
+                            className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
+                          >
+                            <div className="text-sm text-white/90 font-medium truncate">
+                              {title}
+                            </div>
+                            <div className="text-xs text-gray-400 truncate">
+                              {artist}
+                              {bpm ? ` • ${bpm} BPM` : ''}
+                              {keyStr ? ` • ${keyStr}` : ''}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </aside>
         )}
