@@ -10,7 +10,7 @@ import {
   type TrackInfo as TrackInfoType,
   type TransitionInfo as TransitionInfoType,
 } from '../services/audioStream';
-import { Upload } from 'lucide-react';
+import { Upload, MicVocal, Mic, MicOff } from 'lucide-react';
 import SongUpload from '../components/SongUpload.tsx';
 
 type LibrarySong = {
@@ -65,6 +65,20 @@ export default function Home() {
 
   // Music mode state
   const [isPlaying, setIsPlaying] = useState(false);
+  const [inputMode, setInputMode] = useState<"prompt" | "controls">("prompt");
+  const [isPaused, setIsPaused] = useState(false);
+
+  // Voice input (browser speech-to-text)
+  const SpeechRecognitionCtor: any =
+    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const speechSupported = !!SpeechRecognitionCtor;
+  const recognitionRef = useRef<any>(null);
+  const voiceFinalRef = useRef<string>('');
+  const [isListening, setIsListening] = useState(false);
+  const [voicePreview, setVoicePreview] = useState('');
+  const listeningRef = useRef(false);
+  const silenceTimerRef = useRef<number | null>(null);
+  const finalTranscriptRef = useRef('');
   const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
@@ -94,7 +108,7 @@ export default function Home() {
 
   // Simple timer to simulate playback progress while a track is playing
   useEffect(() => {
-    if (!isPlaying || duration <= 0) return;
+    if (!isPlaying || isPaused || duration <= 0) return;
 
     const interval = window.setInterval(() => {
       setCurrentTime((prev) => {
@@ -104,7 +118,7 @@ export default function Home() {
     }, 500);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, duration]);
+  }, [isPlaying, isPaused, duration]);
 
   useEffect(() => {
     // Load library once on mount
@@ -122,6 +136,7 @@ export default function Home() {
         setCurrentTrack(track);
         setIsPlaying(true);
         setLoading(false);
+        setIsPaused(false);
 
         // reset progress
         setCurrentTime(0);
@@ -154,6 +169,7 @@ export default function Home() {
         console.log('Queue empty - exiting music mode');
         setIsPlaying(false);
         setCurrentTrack(null);
+        setIsPaused(false);
         setPendingTransition(null);
         setIsTransitioning(false);
         setCurrentTime(0);
@@ -247,6 +263,157 @@ export default function Home() {
     [connectionStatus, audioService],
   );
 
+  // Set up speech recognition once (stable instance) + auto-send after brief silence
+  useEffect(() => {
+    const SpeechRecognition:
+      | undefined
+      | (new () => any) =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) return;
+
+    const rec = new SpeechRecognition();
+    rec.lang = 'en-US';
+    rec.interimResults = true;
+    rec.continuous = true; // IMPORTANT: don't stop after the first word
+    rec.maxAlternatives = 1;
+
+    const clearSilenceTimer = () => {
+      if (silenceTimerRef.current) {
+        window.clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+    };
+
+    rec.onresult = (event: any) => {
+      // Build transcript from all results so it keeps updating smoothly
+      const text = Array.from(event.results)
+        .map((r: any) => r?.[0]?.transcript ?? '')
+        .join('')
+        .trim();
+
+      finalTranscriptRef.current = text;
+      setVoicePreview(text);
+
+      // Auto-send after the user stops speaking for ~900ms
+      clearSilenceTimer();
+      silenceTimerRef.current = window.setTimeout(() => {
+        const toSend = finalTranscriptRef.current.trim();
+        if (!toSend) return;
+
+        // Stop listening before sending to avoid restarts/double-sends
+        listeningRef.current = false;
+        setIsListening(false);
+
+        try {
+          rec.stop();
+        } catch {
+          // ignore
+        }
+
+        // Clear UI preview after stopping
+        setVoicePreview('');
+        finalTranscriptRef.current = '';
+
+        handleSubmit(toSend);
+      }, 900);
+    };
+
+    rec.onerror = (e: any) => {
+      console.error('[voice] recognition error', e);
+
+      // Chrome often throws these while developing; if user still wants to listen, restart.
+      if (listeningRef.current && (e?.error === 'no-speech' || e?.error === 'aborted')) {
+        try {
+          rec.stop();
+        } catch {
+          // ignore
+        }
+        setTimeout(() => {
+          if (listeningRef.current) {
+            try {
+              rec.start();
+            } catch {
+              // ignore
+            }
+          }
+        }, 250);
+        return;
+      }
+
+      listeningRef.current = false;
+      setIsListening(false);
+      clearSilenceTimer();
+    };
+
+    rec.onend = () => {
+      // Chrome ends recognition frequently; restart if we’re still in listening mode
+      if (listeningRef.current) {
+        try {
+          rec.start();
+        } catch {
+          // ignore
+        }
+      }
+    };
+
+    recognitionRef.current = rec;
+
+    return () => {
+      listeningRef.current = false;
+      clearSilenceTimer();
+      try {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.stop?.();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+    };
+  }, [handleSubmit]);
+
+  const startVoice = useCallback(() => {
+    if (!speechSupported) return;
+    if (connectionStatus !== 'connected') return;
+    if (loading) return;
+
+    const rec = recognitionRef.current;
+    if (!rec) return;
+
+    try {
+      // Reset buffers
+      finalTranscriptRef.current = '';
+      setVoicePreview('');
+
+      listeningRef.current = true;
+      setIsListening(true);
+
+      rec.start?.();
+    } catch (e) {
+      console.error('[voice] start failed', e);
+      listeningRef.current = false;
+      setIsListening(false);
+    }
+  }, [speechSupported, connectionStatus, loading]);
+
+  const stopVoice = useCallback(() => {
+    listeningRef.current = false;
+    setIsListening(false);
+
+    if (silenceTimerRef.current) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+
+    try {
+      recognitionRef.current?.stop?.();
+    } catch (e) {
+      console.error('[voice] stop failed', e);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
         {/* Add Upload Button */}
@@ -309,7 +476,7 @@ export default function Home() {
       >
         {/* Left sidebar: Library */}
         {isPlaying && (
-          <aside className="hidden lg:block w-[280px] flex-shrink-0">
+          <aside className="hidden lg:block w-[340px] xl:w-[360px] flex-shrink-0">
             <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4">
               <div className="flex items-center justify-between mb-3">
                 <div className="text-xs font-semibold tracking-widest text-gray-300">
@@ -330,7 +497,7 @@ export default function Home() {
                 </div>
               )}
 
-              <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
+              <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
                 {librarySongs.length === 0 && !libraryLoading ? (
                   <div className="text-sm text-gray-500">No songs found.</div>
                 ) : (
@@ -379,7 +546,7 @@ export default function Home() {
         >
           {/* Welcome text - fades out when playing */}
           <div
-            className={`text-center space-y-4 transition-all duration-500 ${
+            className={`text-center space-y-5 transition-all duration-500 ${
               isPlaying
                 ? 'opacity-0 scale-95 absolute pointer-events-none'
                 : 'opacity-100 scale-100'
@@ -453,17 +620,121 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Prompt box - transitions to bottom when playing */}
+          {/* Prompt box / Controls - transitions to bottom when playing */}
           <div
             className={`w-full transition-all duration-700 ease-out ${
               isPlaying ? 'mt-auto' : ''
             }`}
           >
-            <PromptBox
-              onSubmit={handleSubmit}
-              loading={loading}
-              disabled={connectionStatus !== 'connected'}
-            />
+            {/* Only show the toggle while in music mode */}
+            {isPlaying && (
+              <div className="w-full max-w-2xl px-4 mb-2 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInputMode((m) => (m === 'prompt' ? 'controls' : 'prompt'))
+                  }
+                  className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 transition"
+                >
+                  <span
+                    className={inputMode === 'prompt' ? 'text-white' : 'text-white/50'}
+                  >
+                    Prompt
+                  </span>
+
+                  <span className="relative inline-flex h-5 w-10 items-center rounded-full bg-white/10 border border-white/10">
+                    <span
+                      className={`inline-block h-4 w-4 rounded-full bg-white/70 transition-transform ${
+                        inputMode === 'controls' ? 'translate-x-5' : 'translate-x-1'
+                      }`}
+                    />
+                  </span>
+
+                  <span
+                    className={inputMode === 'controls' ? 'text-white' : 'text-white/50'}
+                  >
+                    Controls
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* Prompt mode */}
+            {(!isPlaying || inputMode === 'prompt') && (
+              <div className="w-full">
+                {isListening && voicePreview && (
+                  <div className="w-full max-w-2xl px-4 mx-auto mb-2 text-xs text-white/60 truncate flex items-center gap-2">
+                    <MicVocal className="w-4 h-4" />
+                    <span>{voicePreview}</span>
+                  </div>
+                )}
+
+                {!speechSupported && (
+                  <div className="w-full max-w-2xl px-4 mx-auto mb-2 text-xs text-white/40">
+                    Voice input isn’t supported in this browser (works best in Chrome).
+                  </div>
+                )}
+
+                <PromptBox
+                  onSubmit={handleSubmit}
+                  loading={loading}
+                  disabled={connectionStatus !== 'connected'}
+                  rightAccessory={
+                    <button
+                      type="button"
+                      onClick={() => (isListening ? stopVoice() : startVoice())}
+                      disabled={!speechSupported || connectionStatus !== 'connected' || loading}
+                      className="rounded-xl bg-white/10 border border-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-2 transition-colors"
+                      title={
+                        speechSupported
+                          ? isListening
+                            ? 'Stop voice input'
+                            : 'Start voice input'
+                          : 'Voice input not supported in this browser'
+                      }
+                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                    >
+                      {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                    </button>
+                  }
+                />
+              </div>
+            )}
+
+            {/* Controls mode */}
+            {isPlaying && inputMode === 'controls' && (
+              <div className="w-full max-w-2xl px-4">
+                <div className="flex items-center justify-between rounded-2xl bg-white/5 border border-white/10 px-4 py-3 shadow-lg">
+                  <div className="text-xs text-white/60">
+                    {connectionStatus !== 'connected'
+                      ? 'Disconnected'
+                      : !isPlaying
+                      ? 'Nothing playing'
+                      : isPaused
+                      ? 'Paused'
+                      : 'Playing'}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={connectionStatus !== 'connected' || !isPlaying}
+                    onClick={() => {
+                      const svc: any = audioService as any;
+                      if (isPaused) {
+                        svc.resume?.();
+                        setIsPaused(false);
+                      } else {
+                        svc.pause?.();
+                        setIsPaused(true);
+                      }
+                    }}
+                    className="rounded-xl bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:hover:bg-primary-600 text-white px-4 py-2 text-sm font-medium transition-colors"
+                  >
+                    {isPaused ? 'Play' : 'Pause'}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {isPlaying && (
               <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">

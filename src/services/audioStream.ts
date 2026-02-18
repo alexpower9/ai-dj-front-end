@@ -60,6 +60,7 @@ export class AudioStreamService {
   private analyserNode: AnalyserNode | null = null;
   private sampleRate: number = 44100;
   private isPlaying: boolean = false;
+  private isPaused = false;
   private currentSource: AudioBufferSourceNode | null = null;
   private nextStartTime: number = 0;
   
@@ -411,6 +412,7 @@ export class AudioStreamService {
       
       this.currentTrack = null;
       this.isPlaying = false;
+      this.isPaused = false;
       this.pendingTransitionInfo = null;
       
       if (this.callbacks.onTrackEnd) {
@@ -600,7 +602,33 @@ export class AudioStreamService {
   getIsPlaying(): boolean {
     return this.isPlaying;
   }
-  
+
+  getIsPaused(): boolean {
+  return this.isPaused;
+}
+
+pause(): void {
+  if (!this.audioContext) return;
+
+  if (!this.isPaused) {
+    this.audioContext.suspend().catch((e) => {
+      console.warn("[AudioStreamService] pause failed", e);
+    });
+    this.isPaused = true;
+  }
+}
+
+resume(): void {
+  if (!this.audioContext) return;
+
+  if (this.isPaused) {
+    this.audioContext.resume().catch((e) => {
+      console.warn("[AudioStreamService] resume failed", e);
+    });
+    this.isPaused = false;
+  }
+}
+
   getPendingTransition(): TransitionInfo | null {
     return this.pendingTransitionInfo;
   }

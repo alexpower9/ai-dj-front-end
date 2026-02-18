@@ -6,9 +6,11 @@ interface PromptBoxProps {
   onSubmit: (prompt: string) => void;
   loading?: boolean;
   disabled?: boolean;
+  /** Optional extra button/content rendered next to the submit arrow (absolute-positioned; does not affect layout) */
+  rightAccessory?: React.ReactNode;
 }
 
-export default function PromptBox({ onSubmit, loading = false, disabled = false }: PromptBoxProps) {
+export default function PromptBox({ onSubmit, loading = false, disabled = false, rightAccessory }: PromptBoxProps) {
   const [prompt, setPrompt] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,7 +44,7 @@ export default function PromptBox({ onSubmit, loading = false, disabled = false 
           placeholder={disabled ? "Connecting..." : "e.g. Play 'Levels' By Avicii!"}
           rows={1}
           disabled={loading || disabled}
-          className="flex-1 px-5 py-4 bg-transparent text-white placeholder-gray-500 resize-none focus:outline-none rounded-xl min-h-[60px] max-h-[200px] overflow-y-auto text-base disabled:opacity-50"
+          className="flex-1 pl-5 pr-24 py-4 bg-transparent text-white placeholder-gray-500 resize-none focus:outline-none rounded-xl min-h-[60px] max-h-[200px] overflow-y-auto text-base disabled:opacity-50"
           style={{
             height: 'auto',
             minHeight: '60px'
@@ -53,6 +55,11 @@ export default function PromptBox({ onSubmit, loading = false, disabled = false 
             target.style.height = target.scrollHeight + 'px';
           }}
         />
+        {rightAccessory ? (
+          <div className="absolute right-14 bottom-3">
+            {rightAccessory}
+          </div>
+        ) : null}
         <Button 
           type="submit" 
           size="icon" 
