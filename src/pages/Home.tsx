@@ -245,7 +245,7 @@ export default function Home() {
         return;
       }
 
-      setLoading(true);
+      //setLoading(true);
 
       // Safety timeout: clear loading after 30s if no response clears it first
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
