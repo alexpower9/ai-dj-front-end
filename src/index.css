@@ -35,14 +35,19 @@
   --color-dark-border: #2d1b69;
 
   /* Fonts */
-  --font-sans: 'Inter', system-ui, sans-serif;
-  --font-display: 'Poppins', sans-serif;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-display: "Poppins", sans-serif;
 
   /* Custom gradients */
   --gradient-purple-blue: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   --gradient-neon: linear-gradient(135deg, #ff006e 0%, #00f5ff 100%);
   --gradient-dark: linear-gradient(to bottom, #0a0118, #1a0b2e);
-  --gradient-music: linear-gradient(135deg, #8b5cf6 0%, #3b82f6 50%, #00f5ff 100%);
+  --gradient-music: linear-gradient(
+    135deg,
+    #8b5cf6 0%,
+    #3b82f6 50%,
+    #00f5ff 100%
+  );
 
   /* Box shadows */
   --shadow-neon-pink: 0 0 20px rgba(255, 0, 110, 0.5);
@@ -99,7 +104,8 @@
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translateY(0);
   }
   50% {
@@ -224,3 +230,27 @@
   background: rgba(255, 255, 255, 0.28);
   background-clip: padding-box;
 }
+/* --- Slot machine flip animation (quick transition) --- */
+@keyframes slot-flip {
+  0% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  45% {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  46% {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@utility animate-slot-flip {
+  animation: slot-flip 0.45s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+

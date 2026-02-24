@@ -1,19 +1,32 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import PromptBox from '../components/PromptBox';
-import Waveform from '../components/Waveform';
-import PlaybackTimeline from '../components/PlaybackTimeline';
-import QueuePanel from '../components/QueuePanel';
-import TrackInfo from '../components/TrackInfo';
-import TransitionInfo from '../components/TransitionInfo';
+import { useState, useEffect, useCallback, useRef } from "react";
+import PromptBox from "../components/PromptBox";
+import Waveform from "../components/Waveform";
+import PlaybackTimeline from "../components/PlaybackTimeline";
+import QueuePanel from "../components/QueuePanel";
+import TrackInfo from "../components/TrackInfo";
+import TransitionInfo from "../components/TransitionInfo";
 import {
   AudioStreamService,
   type TrackInfo as TrackInfoType,
   type TransitionInfo as TransitionInfoType,
-} from '../services/audioStream';
-import { Upload, MicVocal, Mic, MicOff, ChevronLeft, ChevronRight, UserCircle, Play, Pause, SkipForward, Volume2, VolumeX } from 'lucide-react';
-import SongUpload from '../components/SongUpload.tsx';
-import AccountPanel from './Account';
-import { useAuth } from '../context/AuthContext';
+} from "../services/audioStream";
+import {
+  Upload,
+  MicVocal,
+  Mic,
+  MicOff,
+  ChevronLeft,
+  ChevronRight,
+  UserCircle,
+  Play,
+  Pause,
+  SkipForward,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
+import SongUpload from "../components/SongUpload.tsx";
+import AccountPanel from "./Account";
+import { useAuth } from "../context/AuthContext";
 
 type LibrarySong = {
   id?: string;
@@ -39,36 +52,34 @@ export default function Home() {
     setLibraryLoading(true);
     setLibraryError(null);
     try {
-      const res = await fetch('/api/library');
+      const res = await fetch("/api/library");
       if (!res.ok) throw new Error(`Library fetch failed: ${res.status}`);
       const data: any = await res.json();
       const songs = Array.isArray(data)
         ? data
         : Array.isArray(data?.songs)
-        ? data.songs
-        : Array.isArray(data?.library)
-        ? data.library
-        : [];
+          ? data.songs
+          : Array.isArray(data?.library)
+            ? data.library
+            : [];
       setLibrarySongs(songs);
     } catch (e: any) {
-      console.error('Failed to load library:', e);
-      setLibraryError(e?.message ?? 'Failed to load library');
+      console.error("Failed to load library:", e);
+      setLibraryError(e?.message ?? "Failed to load library");
     } finally {
       setLibraryLoading(false);
     }
   }, []);
 
   const [connectionStatus, setConnectionStatus] = useState<
-    'connecting' | 'connected' | 'disconnected'
-  >('connecting');
+    "connecting" | "connected" | "disconnected"
+  >("connecting");
 
   //Upload Song State
-  const [showUploadModal, setShowUploadModal] =
-      useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
 
   // Library sidebar collapse state
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
-
 
   // Music mode state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -78,14 +89,15 @@ export default function Home() {
 
   // Voice input (browser speech-to-text)
   const SpeechRecognitionCtor: any =
-    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
   const speechSupported = !!SpeechRecognitionCtor;
   const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
-  const [voicePreview, setVoicePreview] = useState('');
+  const [voicePreview, setVoicePreview] = useState("");
   const listeningRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
-  const finalTranscriptRef = useRef('');
+  const finalTranscriptRef = useRef("");
   const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
@@ -99,6 +111,8 @@ export default function Home() {
   const [pendingTransition, setPendingTransition] =
     useState<TransitionInfoType | null>(null);
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isQuickTransitionPending, setIsQuickTransitionPending] =
+    useState(false);
 
   // Music time / progress
   const [currentTime, setCurrentTime] = useState(0); // seconds
@@ -106,17 +120,18 @@ export default function Home() {
   const [transitionPoints, setTransitionPoints] = useState<number[]>([]);
 
   // Queue state
-  const [previousTrack, setPreviousTrack] =
-    useState<TrackInfoType | null>(null);
+  const [previousTrack, setPreviousTrack] = useState<TrackInfoType | null>(
+    null,
+  );
   const [upNext, setUpNext] = useState<TrackInfoType[]>([]);
 
   // Backend log state
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
-  const [rightPanelTab, setRightPanelTab] = useState<'queue' | 'logs'>('queue');
+  const [rightPanelTab, setRightPanelTab] = useState<"queue" | "logs">("queue");
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const trackKey = (t: TrackInfoType | null) =>
-    t ? `${t.title ?? ''}::${t.artist ?? ''}` : '';
+    t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
 
   // Simple timer to simulate playback progress while a track is playing
   useEffect(() => {
@@ -139,7 +154,7 @@ export default function Home() {
     // Set up audio service callbacks
     audioService.setCallbacks({
       onTrackStart: (track) => {
-        console.log('Track started:', track);
+        console.log("Track started:", track);
 
         // old current becomes previous
         setPreviousTrack(currentTrackRef.current);
@@ -159,11 +174,11 @@ export default function Home() {
         const transitionsRaw =
           t?.transition_points ?? t?.transitionPoints ?? [];
 
-        setDuration(typeof trackDuration === 'number' ? trackDuration : 0);
+        setDuration(typeof trackDuration === "number" ? trackDuration : 0);
         setTransitionPoints(
           Array.isArray(transitionsRaw)
-            ? transitionsRaw.filter((n: any) => typeof n === 'number')
-            : []
+            ? transitionsRaw.filter((n: any) => typeof n === "number")
+            : [],
         );
 
         // Clear transition info when new track's audio actually starts
@@ -171,14 +186,16 @@ export default function Home() {
         setIsTransitioning(false);
 
         // Keep the queued list, but remove the track that just started (so the queue represents "up next")
-        setUpNext((prev) => prev.filter((t) => trackKey(t) !== trackKey(track)));
+        setUpNext((prev) =>
+          prev.filter((t) => trackKey(t) !== trackKey(track)),
+        );
       },
       onTrackEnd: () => {
-        console.log('Track ended');
+        console.log("Track ended");
         // wait for queue_empty before fully exiting
       },
       onQueueEmpty: () => {
-        console.log('Queue empty - exiting music mode');
+        console.log("Queue empty - exiting music mode");
         setIsPlaying(false);
         setCurrentTrack(null);
         setIsPaused(false);
@@ -197,7 +214,7 @@ export default function Home() {
         setLoading(false);
       },
       onError: (message) => {
-        console.error('Audio error:', message);
+        console.error("Audio error:", message);
         setLoading(false);
       },
       onInfo: (_type, _message) => {
@@ -206,17 +223,23 @@ export default function Home() {
       },
       // Transition callbacks
       onTransitionPlanned: (transition) => {
-        console.log('Transition planned:', transition);
+        console.log("Transition planned:", transition);
         setPendingTransition(transition);
+
+        if ((transition as any).is_quick) {
+          setIsQuickTransitionPending(true);
+
+          setTimeout(() => setIsQuickTransitionPending(false), 500);
+        }
       },
       onTransitionStart: (transition) => {
-        console.log('Transition starting:', transition);
+        console.log("Transition starting:", transition);
         setPendingTransition(transition);
         setIsTransitioning(true);
       },
       onTransitionComplete: (nowPlaying) => {
         console.log(
-          'Transition complete (backend streaming finished), now playing:',
+          "Transition complete (backend streaming finished), now playing:",
           nowPlaying,
         );
         // don't clear here; onTrackStart will clean it up
@@ -228,7 +251,7 @@ export default function Home() {
         });
         // Auto-scroll to bottom
         requestAnimationFrame(() => {
-          logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          logEndRef.current?.scrollIntoView({ behavior: "smooth" });
         });
       },
     });
@@ -237,14 +260,14 @@ export default function Home() {
     const connectWebSocket = async () => {
       try {
         await audioService.connect();
-        setConnectionStatus('connected');
+        setConnectionStatus("connected");
 
         // Get analyser node after connection
         const analyser = audioService.getAnalyserNode();
         setAnalyserNode(analyser);
       } catch (error) {
-        console.error('Failed to connect to WebSocket:', error);
-        setConnectionStatus('disconnected');
+        console.error("Failed to connect to WebSocket:", error);
+        setConnectionStatus("disconnected");
       }
     };
 
@@ -260,8 +283,8 @@ export default function Home() {
 
   const handleSubmit = useCallback(
     async (prompt: string) => {
-      if (connectionStatus !== 'connected') {
-        console.error('Cannot send prompt - not connected');
+      if (connectionStatus !== "connected") {
+        console.error("Cannot send prompt - not connected");
         return;
       }
 
@@ -270,14 +293,14 @@ export default function Home() {
       // Safety timeout: clear loading after 30s if no response clears it first
       if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       loadingTimeoutRef.current = setTimeout(() => {
-        console.warn('Loading timeout reached — clearing loading state');
+        console.warn("Loading timeout reached — clearing loading state");
         setLoading(false);
       }, 30_000);
 
       try {
         audioService.sendPrompt(prompt);
       } catch (error) {
-        console.error('Error sending prompt:', error);
+        console.error("Error sending prompt:", error);
         setLoading(false);
         if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
       }
@@ -287,15 +310,14 @@ export default function Home() {
 
   // Set up speech recognition once (stable instance) + auto-send after brief silence
   useEffect(() => {
-    const SpeechRecognition:
-      | undefined
-      | (new () => any) =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition: undefined | (new () => any) =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) return;
 
     const rec = new SpeechRecognition();
-    rec.lang = 'en-US';
+    rec.lang = "en-US";
     rec.interimResults = true;
     rec.continuous = true; // IMPORTANT: don't stop after the first word
     rec.maxAlternatives = 1;
@@ -310,8 +332,8 @@ export default function Home() {
     rec.onresult = (event: any) => {
       // Build transcript from all results so it keeps updating smoothly
       const text = Array.from(event.results)
-        .map((r: any) => r?.[0]?.transcript ?? '')
-        .join('')
+        .map((r: any) => r?.[0]?.transcript ?? "")
+        .join("")
         .trim();
 
       finalTranscriptRef.current = text;
@@ -334,18 +356,21 @@ export default function Home() {
         }
 
         // Clear UI preview after stopping
-        setVoicePreview('');
-        finalTranscriptRef.current = '';
+        setVoicePreview("");
+        finalTranscriptRef.current = "";
 
         handleSubmit(toSend);
       }, 900);
     };
 
     rec.onerror = (e: any) => {
-      console.error('[voice] recognition error', e);
+      console.error("[voice] recognition error", e);
 
       // Chrome often throws these while developing; if user still wants to listen, restart.
-      if (listeningRef.current && (e?.error === 'no-speech' || e?.error === 'aborted')) {
+      if (
+        listeningRef.current &&
+        (e?.error === "no-speech" || e?.error === "aborted")
+      ) {
         try {
           rec.stop();
         } catch {
@@ -398,7 +423,7 @@ export default function Home() {
 
   const startVoice = useCallback(() => {
     if (!speechSupported) return;
-    if (connectionStatus !== 'connected') return;
+    if (connectionStatus !== "connected") return;
     if (loading) return;
 
     const rec = recognitionRef.current;
@@ -406,15 +431,15 @@ export default function Home() {
 
     try {
       // Reset buffers
-      finalTranscriptRef.current = '';
-      setVoicePreview('');
+      finalTranscriptRef.current = "";
+      setVoicePreview("");
 
       listeningRef.current = true;
       setIsListening(true);
 
       rec.start?.();
     } catch (e) {
-      console.error('[voice] start failed', e);
+      console.error("[voice] start failed", e);
       listeningRef.current = false;
       setIsListening(false);
     }
@@ -432,68 +457,77 @@ export default function Home() {
     try {
       recognitionRef.current?.stop?.();
     } catch (e) {
-      console.error('[voice] stop failed', e);
+      console.error("[voice] stop failed", e);
     }
   }, []);
 
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        {/* User account icon */}
-        <button
-          onClick={() => isAuthenticated && setShowAccountPanel(true)}
-          title={isAuthenticated ? `Signed in as ${user?.username}` : 'Guest — sign in to access your account'}
-          className={`absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-            isAuthenticated
-              ? 'bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer'
-              : 'bg-white/5 border border-white/10 opacity-50 cursor-default'
-          }`}
-        >
-          <UserCircle className="w-5 h-5 text-white/80" />
-        </button>
+      {/* User account icon */}
+      <button
+        onClick={() => isAuthenticated && setShowAccountPanel(true)}
+        title={
+          isAuthenticated
+            ? `Signed in as ${user?.username}`
+            : "Guest — sign in to access your account"
+        }
+        className={`absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+          isAuthenticated
+            ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+            : "bg-white/5 border border-white/10 opacity-50 cursor-default"
+        }`}
+      >
+        <UserCircle className="w-5 h-5 text-white/80" />
+      </button>
 
-        {/* Account slide-over panel */}
-        <AccountPanel open={showAccountPanel} onClose={() => setShowAccountPanel(false)} />
+      {/* Account slide-over panel */}
+      <AccountPanel
+        open={showAccountPanel}
+        onClose={() => setShowAccountPanel(false)}
+      />
 
-        {/* Add Upload Button */}
-        <button 
-            onClick={() => setShowUploadModal(true)}
-            className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+      {/* Add Upload Button */}
+      <button
+        onClick={() => setShowUploadModal(true)}
+        className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+      >
+        <Upload className="w-v h-4" />
+        Upload Song
+      </button>
+      {/* ← ADD UPLOAD MODAL */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="relative">
+            <button
+              onClick={() => setShowUploadModal(false)}
+              className="absolute -top-12 right-0 text-white text-2xl hover:text-gray-300"
             >
-            <Upload className="w-v h-4" />
-            Upload Song
-        </button>
-        {/* ← ADD UPLOAD MODAL */}
-              {showUploadModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowUploadModal(false)}
-                      className="absolute -top-12 right-0 text-white text-2xl hover:text-gray-300"
-                    >
-                      ✕ Close
-                    </button>
-                    <SongUpload
-                      onUploadComplete={(filename) => {
-                        console.log('Uploaded:', filename);
-                        setShowUploadModal(false);
-                        refreshLibrary();
-                      }}
-                    />
-                </div>
-            </div>
-        )}
+              ✕ Close
+            </button>
+            <SongUpload
+              onUploadComplete={(filename) => {
+                console.log("Uploaded:", filename);
+                setShowUploadModal(false);
+                refreshLibrary();
+              }}
+            />
+          </div>
+        </div>
+      )}
       {/* Background effects */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div
           className={`absolute top-1/4 left-1/4 w-96 h-96 bg-primary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
-            isPlaying ? 'scale-150 opacity-40 animate-pulse' : 'animate-pulse-slow'
+            isPlaying
+              ? "scale-150 opacity-40 animate-pulse"
+              : "animate-pulse-slow"
           }`}
         />
         <div
           className={`absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
             isPlaying
-              ? 'scale-150 opacity-40 animate-pulse'
-              : 'animate-pulse-slow animation-delay-1000'
+              ? "scale-150 opacity-40 animate-pulse"
+              : "animate-pulse-slow animation-delay-1000"
           }`}
         />
         {isPlaying && (
@@ -508,18 +542,20 @@ export default function Home() {
       <div
         className={`max-w-screen-2xl w-full relative z-10 flex transition-all duration-700 ease-out ${
           isPlaying
-            ? 'h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8'
-            : 'flex-col justify-center space-y-8'
+            ? "h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8"
+            : "flex-col justify-center space-y-8"
         }`}
       >
         {/* Left sidebar: Library */}
         {isPlaying && (
           <aside
             className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
-              isLibraryCollapsed ? 'w-10' : 'w-[340px] xl:w-[360px]'
+              isLibraryCollapsed ? "w-10" : "w-[340px] xl:w-[360px]"
             }`}
           >
-            <div className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? 'p-0' : 'p-4'}`}>
+            <div
+              className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? "p-0" : "p-4"}`}
+            >
               {isLibraryCollapsed ? (
                 /* Collapsed: just the expand button */
                 <button
@@ -543,7 +579,7 @@ export default function Home() {
                         onClick={refreshLibrary}
                         className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
                       >
-                        {libraryLoading ? 'Loading…' : 'Refresh'}
+                        {libraryLoading ? "Loading…" : "Refresh"}
                       </button>
                       <button
                         type="button"
@@ -564,26 +600,37 @@ export default function Home() {
 
                   <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
                     {librarySongs.length === 0 && !libraryLoading ? (
-                      <div className="text-sm text-gray-500">No songs found.</div>
+                      <div className="text-sm text-gray-500">
+                        No songs found.
+                      </div>
                     ) : (
                       librarySongs.map((s: any, idx: number) => {
-                        const title = s?.title ?? s?.name ?? s?.song_name ?? s?.id ?? 'Untitled';
-                        const artist = s?.artist ?? '';
-                        const bpm = typeof s?.bpm === 'number' ? Math.round(s.bpm) : null;
-                        const key = s?.key ?? '';
-                        const scale = s?.scale ?? '';
+                        const title =
+                          s?.title ??
+                          s?.name ??
+                          s?.song_name ??
+                          s?.id ??
+                          "Untitled";
+                        const artist = s?.artist ?? "";
+                        const bpm =
+                          typeof s?.bpm === "number" ? Math.round(s.bpm) : null;
+                        const key = s?.key ?? "";
+                        const scale = s?.scale ?? "";
 
                         const prettyPrompt = artist
                           ? `play ${title} by ${artist}`
                           : `play ${title}`;
 
-                        const keyStr = `${key}${scale ? ` ${scale}` : ''}`.trim();
+                        const keyStr =
+                          `${key}${scale ? ` ${scale}` : ""}`.trim();
 
                         return (
                           <button
                             key={s?.id ?? `${title}::${artist}::${idx}`}
                             type="button"
-                            disabled={connectionStatus !== 'connected' || loading}
+                            disabled={
+                              connectionStatus !== "connected" || loading
+                            }
                             onClick={() => handleSubmit(prettyPrompt)}
                             className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
                           >
@@ -592,8 +639,8 @@ export default function Home() {
                             </div>
                             <div className="text-xs text-gray-400 truncate">
                               {artist}
-                              {bpm ? ` • ${bpm} BPM` : ''}
-                              {keyStr ? ` • ${keyStr}` : ''}
+                              {bpm ? ` • ${bpm} BPM` : ""}
+                              {keyStr ? ` • ${keyStr}` : ""}
                             </div>
                           </button>
                         );
@@ -608,15 +655,15 @@ export default function Home() {
         {/* Left column */}
         <div
           className={`flex-1 relative flex flex-col transition-all duration-700 ease-out ${
-            isPlaying ? 'justify-between' : 'justify-center'
+            isPlaying ? "justify-between" : "justify-center"
           }`}
         >
           {/* Welcome text - fades out when playing */}
           <div
             className={`text-center space-y-5 transition-all duration-500 ${
               isPlaying
-                ? 'opacity-0 scale-95 absolute pointer-events-none'
-                : 'opacity-100 scale-100'
+                ? "opacity-0 scale-95 absolute pointer-events-none"
+                : "opacity-100 scale-100"
             }`}
           >
             <h1 className="text-7xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
@@ -629,24 +676,24 @@ export default function Home() {
             {/* Connection status - only show when not playing */}
             <div
               className={`flex items-center justify-center gap-2 text-sm transition-opacity duration-300 ${
-                isPlaying ? 'opacity-0' : 'opacity-100'
+                isPlaying ? "opacity-0" : "opacity-100"
               }`}
             >
               <div
                 className={`w-2 h-2 rounded-full ${
-                  connectionStatus === 'connected'
-                    ? 'bg-green-500'
-                    : connectionStatus === 'connecting'
-                    ? 'bg-yellow-500 animate-pulse'
-                    : 'bg-red-500'
+                  connectionStatus === "connected"
+                    ? "bg-green-500"
+                    : connectionStatus === "connecting"
+                      ? "bg-yellow-500 animate-pulse"
+                      : "bg-red-500"
                 }`}
               />
               <span className="text-gray-400">
-                {connectionStatus === 'connected'
-                  ? 'Connected'
-                  : connectionStatus === 'connecting'
-                  ? 'Connecting...'
-                  : 'Disconnected'}
+                {connectionStatus === "connected"
+                  ? "Connected"
+                  : connectionStatus === "connecting"
+                    ? "Connecting..."
+                    : "Disconnected"}
               </span>
             </div>
           </div>
@@ -655,8 +702,8 @@ export default function Home() {
           <div
             className={`flex-1 flex flex-col items-center justify-center transition-all duration-500 ${
               isPlaying
-                ? 'opacity-100 scale-100'
-                : 'opacity-0 scale-95 absolute pointer-events-none'
+                ? "opacity-100 scale-100"
+                : "opacity-0 scale-95 absolute pointer-events-none"
             }`}
           >
             {/* Transition info at the very top - shows upcoming mix */}
@@ -664,6 +711,7 @@ export default function Home() {
               <TransitionInfo
                 transition={pendingTransition}
                 isTransitioning={isTransitioning}
+                isQuickTransitionPending={isQuickTransitionPending}
               />
             </div>
 
@@ -690,7 +738,7 @@ export default function Home() {
           {/* Prompt box / Controls - transitions to bottom when playing */}
           <div
             className={`w-full transition-all duration-700 ease-out ${
-              isPlaying ? 'mt-auto' : ''
+              isPlaying ? "mt-auto" : ""
             }`}
           >
             {/* Only show the toggle while in music mode */}
@@ -699,12 +747,16 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() =>
-                    setInputMode((m) => (m === 'prompt' ? 'controls' : 'prompt'))
+                    setInputMode((m) =>
+                      m === "prompt" ? "controls" : "prompt",
+                    )
                   }
                   className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 transition"
                 >
                   <span
-                    className={inputMode === 'prompt' ? 'text-white' : 'text-white/50'}
+                    className={
+                      inputMode === "prompt" ? "text-white" : "text-white/50"
+                    }
                   >
                     Prompt
                   </span>
@@ -712,13 +764,17 @@ export default function Home() {
                   <span className="relative inline-flex h-5 w-10 items-center rounded-full bg-white/10 border border-white/10">
                     <span
                       className={`inline-block h-4 w-4 rounded-full bg-white/70 transition-transform ${
-                        inputMode === 'controls' ? 'translate-x-5' : 'translate-x-1'
+                        inputMode === "controls"
+                          ? "translate-x-5"
+                          : "translate-x-1"
                       }`}
                     />
                   </span>
 
                   <span
-                    className={inputMode === 'controls' ? 'text-white' : 'text-white/50'}
+                    className={
+                      inputMode === "controls" ? "text-white" : "text-white/50"
+                    }
                   >
                     Controls
                   </span>
@@ -727,7 +783,7 @@ export default function Home() {
             )}
 
             {/* Prompt mode */}
-            {(!isPlaying || inputMode === 'prompt') && (
+            {(!isPlaying || inputMode === "prompt") && (
               <div className="w-full max-w-2xl mx-auto px-4">
                 {isListening && voicePreview && (
                   <div className="mb-2 text-xs text-white/60 truncate flex items-center gap-2">
@@ -738,30 +794,41 @@ export default function Home() {
 
                 {!speechSupported && (
                   <div className="mb-2 text-xs text-white/40">
-                    Voice input isn’t supported in this browser (works best in Chrome).
+                    Voice input isn’t supported in this browser (works best in
+                    Chrome).
                   </div>
                 )}
 
                 <PromptBox
                   onSubmit={handleSubmit}
                   loading={loading}
-                  disabled={connectionStatus !== 'connected'}
+                  disabled={connectionStatus !== "connected"}
                   rightAccessory={
                     <button
                       type="button"
                       onClick={() => (isListening ? stopVoice() : startVoice())}
-                      disabled={!speechSupported || connectionStatus !== 'connected' || loading}
+                      disabled={
+                        !speechSupported ||
+                        connectionStatus !== "connected" ||
+                        loading
+                      }
                       className="rounded-xl bg-white/10 border border-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-2 transition-colors"
                       title={
                         speechSupported
                           ? isListening
-                            ? 'Stop voice input'
-                            : 'Start voice input'
-                          : 'Voice input not supported in this browser'
+                            ? "Stop voice input"
+                            : "Start voice input"
+                          : "Voice input not supported in this browser"
                       }
-                      aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                      aria-label={
+                        isListening ? "Stop voice input" : "Start voice input"
+                      }
                     >
-                      {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                      {isListening ? (
+                        <MicOff className="w-5 h-5" />
+                      ) : (
+                        <Mic className="w-5 h-5" />
+                      )}
                     </button>
                   }
                 />
@@ -769,13 +836,13 @@ export default function Home() {
             )}
 
             {/* Controls mode */}
-            {isPlaying && inputMode === 'controls' && (
+            {isPlaying && inputMode === "controls" && (
               <div className="w-full max-w-2xl mx-auto px-4">
                 <div className="flex items-center gap-4 rounded-2xl bg-white/5 border border-white/10 px-5 py-3 shadow-lg">
                   {/* Play / Pause */}
                   <button
                     type="button"
-                    disabled={connectionStatus !== 'connected' || !isPlaying}
+                    disabled={connectionStatus !== "connected" || !isPlaying}
                     onClick={() => {
                       if (isPaused) {
                         audioService.resume();
@@ -786,16 +853,20 @@ export default function Home() {
                       }
                     }}
                     className="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-                    title={isPaused ? 'Resume' : 'Pause'}
+                    title={isPaused ? "Resume" : "Pause"}
                   >
-                    {isPaused ? <Play className="w-4 h-4 ml-0.5" /> : <Pause className="w-4 h-4" />}
+                    {isPaused ? (
+                      <Play className="w-4 h-4 ml-0.5" />
+                    ) : (
+                      <Pause className="w-4 h-4" />
+                    )}
                   </button>
 
                   {/* Next (quick transition) */}
                   <button
                     type="button"
-                    disabled={connectionStatus !== 'connected' || !isPlaying}
-                    onClick={() => handleSubmit('skip to next song')}
+                    disabled={connectionStatus !== "connected" || !isPlaying}
+                    onClick={() => handleSubmit("skip to next song")}
                     className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
                     title="Skip to next song"
                   >
@@ -812,9 +883,13 @@ export default function Home() {
                         audioService.setVolume(newVol);
                       }}
                       className="text-white/60 hover:text-white transition-colors shrink-0 cursor-pointer"
-                      title={volume === 0 ? 'Unmute' : 'Mute'}
+                      title={volume === 0 ? "Unmute" : "Mute"}
                     >
-                      {volume === 0 ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                      {volume === 0 ? (
+                        <VolumeX className="w-4 h-4" />
+                      ) : (
+                        <Volume2 className="w-4 h-4" />
+                      )}
                     </button>
                     <input
                       type="range"
@@ -837,8 +912,8 @@ export default function Home() {
             {isPlaying && (
               <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
                 {pendingTransition
-                  ? 'Transition queued! Ask for another song to queue more'
-                  : 'Request another song to mix it in'}
+                  ? "Transition queued! Ask for another song to queue more"
+                  : "Request another song to mix it in"}
               </p>
             )}
           </div>
@@ -852,22 +927,22 @@ export default function Home() {
               <div className="flex mb-3 bg-black/20 rounded-lg p-0.5 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setRightPanelTab('queue')}
+                  onClick={() => setRightPanelTab("queue")}
                   className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === 'queue'
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/40 hover:text-white/60'
+                    rightPanelTab === "queue"
+                      ? "bg-white/10 text-white"
+                      : "text-white/40 hover:text-white/60"
                   }`}
                 >
                   Queue
                 </button>
                 <button
                   type="button"
-                  onClick={() => setRightPanelTab('logs')}
+                  onClick={() => setRightPanelTab("logs")}
                   className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === 'logs'
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/40 hover:text-white/60'
+                    rightPanelTab === "logs"
+                      ? "bg-white/10 text-white"
+                      : "text-white/40 hover:text-white/60"
                   }`}
                 >
                   Logs
@@ -875,17 +950,19 @@ export default function Home() {
               </div>
 
               {/* Queue view */}
-              {rightPanelTab === 'queue' && (
+              {rightPanelTab === "queue" && (
                 <QueuePanel
                   currentTrack={currentTrack}
                   previousTrack={previousTrack}
                   upNext={upNext}
-                  onReorder={(newOrder) => audioService.sendReorderQueue(newOrder)}
+                  onReorder={(newOrder) =>
+                    audioService.sendReorderQueue(newOrder)
+                  }
                 />
               )}
 
               {/* Logs view */}
-              {rightPanelTab === 'logs' && (
+              {rightPanelTab === "logs" && (
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex-1 overflow-y-auto library-scroll rounded-lg bg-black/30 border border-white/5 p-3 font-mono text-[11px] leading-relaxed text-white/60">
                     {backendLogs.length === 0 ? (
@@ -895,15 +972,16 @@ export default function Home() {
                         <div
                           key={i}
                           className={`py-0.5 ${
-                            line.includes('ERROR') || line.includes('Error')
-                              ? 'text-red-400'
-                              : line.includes('[WS]')
-                              ? 'text-neon-cyan/70'
-                              : line.includes('[QUEUE]')
-                              ? 'text-neon-green/70'
-                              : line.includes('[TRANSITION]') || line.includes('[DEBUG]')
-                              ? 'text-neon-purple/70'
-                              : ''
+                            line.includes("ERROR") || line.includes("Error")
+                              ? "text-red-400"
+                              : line.includes("[WS]")
+                                ? "text-neon-cyan/70"
+                                : line.includes("[QUEUE]")
+                                  ? "text-neon-green/70"
+                                  : line.includes("[TRANSITION]") ||
+                                      line.includes("[DEBUG]")
+                                    ? "text-neon-purple/70"
+                                    : ""
                           }`}
                         >
                           {line}
