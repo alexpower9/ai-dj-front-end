@@ -1,5 +1,3 @@
-import { buffer } from "stream/consumers";
-
 export interface TrackInfo {
     title: string;
     artist: string;
@@ -185,6 +183,11 @@ export class AudioStreamService {
         }
     }
 
+    private getBufferDelay(): number {
+        if (!this.audioContext) return 0;
+        return Math.max(0, this.nextStartTime - this.audioContext.currentTime);
+    }
+
     private handleJsonMessage(message: any) {
         console.log("📨 Received JSON:", message);
 
@@ -310,17 +313,20 @@ export class AudioStreamService {
                 break;
 
             case "transition_complete":
-                console.log(
-                    "🎛️ Transition complete, now playing:",
-                    message.now_playing?.title,
-                );
-                this.isTransitioning = false;
-                this.pendingTransitionInfo = null;
-                if (this.callbacks.onTransitionComplete) {
-                    this.callbacks.onTransitionComplete(
-                        message.now_playing?.title || "Unknown",
+                const delay = this.getBufferDelay();
+                setTimeout(() => {
+                    console.log(
+                        "🎛️ Transition complete, now playing:",
+                        message.now_playing?.title,
                     );
-                }
+                    this.isTransitioning = false;
+                    this.pendingTransitionInfo = null;
+                    if (this.callbacks.onTransitionComplete) {
+                        this.callbacks.onTransitionComplete(
+                            message.now_playing?.title || "Unknown",
+                        );
+                    }
+                }, delay * 1000);
                 break;
 
             case "error":
@@ -488,6 +494,28 @@ export class AudioStreamService {
         }
     }
 
+    private applyFades(audioBuffer: AudioBuffer): AudioBuffer {
+        const fadeFrames = Math.floor(this.sampleRate * 0.005);
+
+        for (
+            let channel = 0;
+            channel < audioBuffer.numberOfChannels;
+            channel++
+        ) {
+            const data = audioBuffer.getChannelData(channel);
+
+            for (let i = 0; i < fadeFrames; i++) {
+                data[i] *= i / fadeFrames;
+            }
+
+            for (let i = 0; i < fadeFrames; i++) {
+                data[data.length - 1 - i] *= i / fadeFrames;
+            }
+        }
+
+        return audioBuffer;
+    }
+
     private async handleAudioData(blob: Blob) {
         try {
             if (!this.audioContext) {
@@ -500,25 +528,40 @@ export class AudioStreamService {
 
             // Convert int16 PCM data to AudioBuffer
             const audioBuffer = this.int16ToAudioBuffer(arrayBuffer);
+            const fadedBuffer = this.applyFades(audioBuffer);
 
             // Create queue item tagged with current streaming track ID
             const queueItem: QueuedAudio = {
-                buffer: audioBuffer,
+                buffer: fadedBuffer,
                 trackId: this.currentStreamingTrackId,
             };
 
             // Add to queue
             this.audioQueue.push(queueItem);
 
+            const bufferAhead =
+                this.nextStartTime - (this.audioContext?.currentTime ?? 0);
+            //Logging to see buffer health
+            if (bufferAhead < 2.0) {
+                console.log(
+                    `📊 Buffer: ${bufferAhead.toFixed(3)}s ahead, queue: ${this.audioQueue.length} chunks`,
+                );
+            }
+
+            if (bufferAhead < 0.2 && !this.buffering) {
+                console.warn("Buffer nearly emply, re-buffering...");
+                this.buffering = true;
+                if (this.audioContext) {
+                    this.nextStartTime = this.audioContext.currentTime + 0.5;
+                }
+            }
+
             if (
                 this.buffering &&
                 this.audioQueue.length >= this.PRE_BUFFER_CHUNKS
             ) {
                 this.buffering = false;
-
-                while (this.audioQueue.length > 0) {
-                    this.scheduleNextBuffer();
-                }
+                this.scheduleNextBuffer();
             } else if (!this.buffering) {
                 this.scheduleNextBuffer();
             }
