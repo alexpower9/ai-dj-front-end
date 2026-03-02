@@ -542,7 +542,8 @@ export class AudioStreamService {
             const bufferAhead =
                 this.nextStartTime - (this.audioContext?.currentTime ?? 0);
             //Logging to see buffer health
-            if (bufferAhead < 2.0) {
+            //This log should only occur if the buffer is lagging behind
+            if (bufferAhead < 0.5) {
                 console.log(
                     `📊 Buffer: ${bufferAhead.toFixed(3)}s ahead, queue: ${this.audioQueue.length} chunks`,
                 );
