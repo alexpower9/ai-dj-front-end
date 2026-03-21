@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { Upload, Music, CheckCircle, XCircle, Loader } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
 
 interface UploadStatus {
     status: "idle" | "uploading" | "success" | "error";
@@ -14,6 +15,7 @@ interface SongUploadProps {
 }
 
 export default function SongUpload({ onUploadComplete }: SongUploadProps) {
+    const { token } = useAuth();
     const [file, setFile] = useState<File | null>(null);
     const [artist, setArtist] = useState("");
     const [title, setTitle] = useState("");
@@ -92,6 +94,7 @@ export default function SongUpload({ onUploadComplete }: SongUploadProps) {
 
             const response = await fetch("/api/upload/song", {
                 method: "POST",
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
                 body: formData,
             });
 
