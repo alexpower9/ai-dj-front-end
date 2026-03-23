@@ -136,6 +136,56 @@ export default function Home() {
     );
     const logEndRef = useRef<HTMLDivElement>(null);
 
+    // EQ / Bass UI (frontend concept only)
+    const [bassLevel, setBassLevel] = useState(50); // 0..100
+    const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
+        null,
+    );
+    const [isEditingBass, setIsEditingBass] = useState(false);
+    const [bassInput, setBassInput] = useState(String(bassLevel));
+
+    const clamp = (v: number, min: number, max: number) =>
+        Math.max(min, Math.min(max, v));
+
+    // Push bass UI value into WebAudio (client-side) whenever it changes
+    useEffect(() => {
+        try {
+            (audioService as any).setBass?.(bassLevel);
+        } catch (e) {
+            console.warn("setBass failed:", e);
+        }
+    }, [bassLevel, audioService]);
+
+    // Map 0..100 => -135deg .. +135deg (classic knob sweep)
+    const bassAngle = -135 + (bassLevel / 100) * 270;
+
+    const onKnobPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        // Capture pointer so we keep receiving move events even if the cursor leaves the knob.
+        try {
+            (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+        } catch {
+            // ignore
+        }
+        knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
+    };
+
+    const onKnobPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+        e.preventDefault();
+        if (!knobDragRef.current) return;
+
+        const deltaY = knobDragRef.current.startY - e.clientY; // up = increase
+        const next = knobDragRef.current.startValue + deltaY * 0.35; // sensitivity
+        const clampedVal = clamp(Math.round(next), 0, 100);
+
+        setBassLevel(clampedVal);
+        setBassInput(String(clampedVal));
+    };
+
+    const onKnobPointerUp = () => {
+        knobDragRef.current = null;
+    };
+
     const trackKey = (t: TrackInfoType | null) =>
         t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
 
@@ -1026,14 +1076,89 @@ export default function Home() {
 
                             {/* Queue view */}
                             {rightPanelTab === "queue" && (
-                                <QueuePanel
-                                    currentTrack={currentTrack}
-                                    previousTrack={previousTrack}
-                                    upNext={upNext}
-                                    onReorder={(newOrder) =>
-                                        audioService.sendReorderQueue(newOrder)
-                                    }
-                                />
+                                <div className="flex-1 min-h-0 flex flex-col relative">
+                                    <div className="flex-1 min-h-0">
+                                        <QueuePanel
+                                            currentTrack={currentTrack}
+                                            previousTrack={previousTrack}
+                                            upNext={upNext}
+                                            onReorder={(newOrder) =>
+                                                audioService.sendReorderQueue(
+                                                    newOrder,
+                                                )
+                                            }
+                                        />
+                                    </div>
+
+                                    {/* EQ/Bass concept UI anchored bottom-right (visual only) */}
+                                    <div className="absolute bottom-4 right-4">
+                                        <div className="flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-xl shadow-lg">
+                                            <div className="flex flex-col items-center">
+                                                <div className="text-[10px] tracking-widest text-white/60 mb-1">
+                                                    BASS
+                                                </div>
+
+                                                <button
+                                                    type="button"
+                                                    onPointerDown={onKnobPointerDown}
+                                                    onPointerMove={onKnobPointerMove}
+                                                    onPointerUp={onKnobPointerUp}
+                                                    onPointerCancel={onKnobPointerUp}
+                                                    className="relative w-14 h-14 rounded-full bg-black/30 border border-white/10 shadow-lg cursor-ns-resize touch-none select-none"
+                                                    style={{ touchAction: "none" }}
+                                                    aria-label="Bass control (demo)"
+                                                    title="Drag up/down"
+                                                >
+                                                    {/* Knob indicator line */}
+                                                    <span
+                                                        className="absolute left-1/2 top-1/2 w-1 h-6 bg-gradient-to-b from-neon-cyan/80 to-primary-500/80 rounded-full"
+                                                        style={{
+                                                            transform: `translate(-50%, -95%) rotate(${bassAngle}deg)`,
+                                                            transformOrigin: "50% 95%",
+                                                        }}
+                                                    />
+                                                    {/* Center cap */}
+                                                    <span className="absolute left-1/2 top-1/2 w-5 h-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/10 border border-white/10" />
+                                                </button>
+
+                                                <div className="mt-1 text-[10px] text-white/50 tabular-nums">
+                                                    {isEditingBass ? (
+                                                        <input
+                                                            type="number"
+                                                            value={bassInput}
+                                                            autoFocus
+                                                            min={0}
+                                                            max={100}
+                                                            onChange={(e) => setBassInput(e.target.value)}
+                                                            onBlur={() => {
+                                                                const val = clamp(Number(bassInput) || 0, 0, 100);
+                                                                setBassLevel(val);
+                                                                setBassInput(String(val));
+                                                                setIsEditingBass(false);
+                                                            }}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === "Enter") {
+                                                                    const val = clamp(Number(bassInput) || 0, 0, 100);
+                                                                    setBassLevel(val);
+                                                                    setBassInput(String(val));
+                                                                    setIsEditingBass(false);
+                                                                }
+                                                            }}
+                                                            className="w-10 bg-black/40 border border-white/10 rounded text-center text-white outline-none"
+                                                        />
+                                                    ) : (
+                                                        <button
+                                                            onClick={() => setIsEditingBass(true)}
+                                                            className="hover:text-white transition"
+                                                        >
+                                                            {bassLevel}%
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             )}
 
                             {/* Logs view */}

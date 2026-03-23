@@ -62,7 +62,13 @@ export class AudioStreamService {
     private audioContext: AudioContext | null = null;
     private analyserNode: AnalyserNode | null = null;
     private gainNode: GainNode | null = null;
+
+    // Bass (low-shelf) filter
+    private bassFilterNode: BiquadFilterNode | null = null;
+    private bassValue: number = 50; // 0..100 (50 = neutral)
+
     private sampleRate: number = 44100;
+
     private isPlaying: boolean = false;
     private isPaused = false;
     private currentSource: AudioBufferSourceNode | null = null;
@@ -177,6 +183,18 @@ export class AudioStreamService {
             this.analyserNode = this.audioContext.createAnalyser();
             this.analyserNode.fftSize = 256;
             this.analyserNode.smoothingTimeConstant = 0.8;
+
+            // Bass filter (low-shelf) before analyser -> gain -> destination
+            this.bassFilterNode = this.audioContext.createBiquadFilter();
+            this.bassFilterNode.type = "lowshelf";
+            this.bassFilterNode.frequency.value = 180; // Hz
+
+            // Apply current bass value (0..100 => -12..+12 dB, 50 = 0 dB)
+            const gainDb = ((this.bassValue - 50) / 50) * 12;
+            this.bassFilterNode.gain.value = gainDb;
+
+            // Wire: bassFilter -> analyser -> gain -> destination
+            this.bassFilterNode.connect(this.analyserNode);
             this.analyserNode.connect(this.gainNode);
 
             console.log("🎵 Audio context and analyser initialized");
@@ -708,7 +726,10 @@ export class AudioStreamService {
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
 
-            if (this.analyserNode) {
+            if (this.bassFilterNode) {
+                // Route: source -> bassFilter -> analyser -> gain -> destination
+                source.connect(this.bassFilterNode);
+            } else if (this.analyserNode) {
                 source.connect(this.analyserNode);
             } else if (this.gainNode) {
                 source.connect(this.gainNode);
@@ -818,6 +839,23 @@ export class AudioStreamService {
     setVolume(value: number): void {
         if (this.gainNode) {
             this.gainNode.gain.value = Math.max(0, Math.min(1, value));
+        }
+    }
+        setBass(value: number): void {
+        const clamped = Math.max(0, Math.min(100, value));
+        this.bassValue = clamped;
+
+        // Map 0..100 => -12..+12 dB (50 = 0 dB)
+        const gainDb = ((clamped - 50) / 50) * 12;
+
+        if (this.bassFilterNode) {
+            const now = this.audioContext?.currentTime ?? 0;
+            try {
+                this.bassFilterNode.gain.cancelScheduledValues(now);
+                this.bassFilterNode.gain.setTargetAtTime(gainDb, now, 0.03);
+            } catch {
+                this.bassFilterNode.gain.value = gainDb;
+            }
         }
     }
 
