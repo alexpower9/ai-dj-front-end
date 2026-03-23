@@ -107,6 +107,25 @@ export default function Home() {
   const listeningRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
   const finalTranscriptRef = useRef("");
+  // Wake-word voice control
+  const WAKE_WORD = "hey tempo";
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceMode, setVoiceMode] = useState<"wake" | "capture">("wake");
+  const voiceEnabledRef = useRef(true);
+  const voiceModeRef = useRef<"wake" | "capture">("wake");
+
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+  }, [voiceEnabled]);
+
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+
+  const wakeBufferRef = useRef("");
+  const captureFinalRef = useRef("");
+  const captureInterimRef = useRef("");
+  const recognitionRunningRef = useRef(false);
   const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
@@ -144,6 +163,56 @@ export default function Home() {
     { id: number; message: string; type: "error" | "info" | "success" }[]
   >([]);
   const toastIdRef = useRef(0);
+
+  // EQ / Bass UI (frontend concept only)
+  const [bassLevel, setBassLevel] = useState(50); // 0..100
+  const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
+    null,
+  );
+  const [isEditingBass, setIsEditingBass] = useState(false);
+  const [bassInput, setBassInput] = useState(String(bassLevel));
+
+  const clamp = (v: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, v));
+
+  // Push bass UI value into WebAudio (client-side) whenever it changes
+  useEffect(() => {
+    try {
+      (audioService as any).setBass?.(bassLevel);
+    } catch (e) {
+      console.warn("setBass failed:", e);
+    }
+  }, [bassLevel, audioService]);
+
+  // Map 0..100 => -135deg .. +135deg (classic knob sweep)
+  const bassAngle = -135 + (bassLevel / 100) * 270;
+
+  const onKnobPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    // Capture pointer so we keep receiving move events even if the cursor leaves the knob.
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {
+      // ignore
+    }
+    knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
+  };
+
+  const onKnobPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (!knobDragRef.current) return;
+
+    const deltaY = knobDragRef.current.startY - e.clientY; // up = increase
+    const next = knobDragRef.current.startValue + deltaY * 0.35; // sensitivity
+    const clampedVal = clamp(Math.round(next), 0, 100);
+
+    setBassLevel(clampedVal);
+    setBassInput(String(clampedVal));
+  };
+
+  const onKnobPointerUp = () => {
+    knobDragRef.current = null;
+  };
 
   const addToast = useCallback(
     (message: string, type: "error" | "info" | "success" = "info") => {
@@ -348,7 +417,9 @@ export default function Home() {
         [connectionStatus, audioService],
     );
 
-    // Set up speech recognition once (stable instance) + auto-send after brief silence
+    // Set up speech recognition once (stable instance)
+    // Wake mode: always listens for "hey tempo"
+    // Capture mode: after wake word, captures a prompt and auto-sends after brief silence
     useEffect(() => {
         const SpeechRecognition: undefined | (new () => any) =
             (window as any).SpeechRecognition ||
@@ -359,7 +430,7 @@ export default function Home() {
         const rec = new SpeechRecognition();
         rec.lang = "en-US";
         rec.interimResults = true;
-        rec.continuous = true; // IMPORTANT: don't stop after the first word
+        rec.continuous = true;
         rec.maxAlternatives = 1;
 
         const clearSilenceTimer = () => {
@@ -369,47 +440,125 @@ export default function Home() {
             }
         };
 
-        rec.onresult = (event: any) => {
-            // Build transcript from all results so it keeps updating smoothly
-            const text = Array.from(event.results)
-                .map((r: any) => r?.[0]?.transcript ?? "")
-                .join("")
+        const stripWakeWord = (text: string) => {
+            // Remove wake word from any transcript before sending/previewing
+            const cleaned = (text || "")
+                .replace(/\bhey\s+tempo\b/gi, " ")
+                .replace(/\s+/g, " ")
                 .trim();
+            return cleaned;
+        };
 
-            finalTranscriptRef.current = text;
-            setVoicePreview(text);
+        const resetToWakeMode = () => {
+            setVoiceMode("wake");
+            voiceModeRef.current = "wake";
+            setIsListening(false);
+            setVoicePreview("");
+            wakeBufferRef.current = "";
+            captureFinalRef.current = "";
+            captureInterimRef.current = "";
+            finalTranscriptRef.current = "";
+            clearSilenceTimer();
+        };
+
+        rec.onstart = () => {
+            recognitionRunningRef.current = true;
+        };
+
+        rec.onresult = (event: any) => {
+            const mode = voiceModeRef.current;
+            // Process only new results to avoid re-building the entire transcript every time.
+            let interimChunk = "";
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const txt = (event.results[i]?.[0]?.transcript ?? "").trim();
+                if (!txt) continue;
+
+                if (event.results[i].isFinal) {
+                    if (mode === "capture") {
+                        const cleaned = stripWakeWord(txt);
+                        if (cleaned) {
+                            captureFinalRef.current =
+                                (captureFinalRef.current + " " + cleaned).trim();
+                        }
+                    } else {
+                        wakeBufferRef.current =
+                            (wakeBufferRef.current + " " + txt).trim();
+                    }
+                } else {
+                    // Keep interim for live preview, but never include the wake word
+                    const interimCleaned =
+                        mode === "capture" ? stripWakeWord(txt) : txt;
+                    interimChunk = (interimChunk + " " + interimCleaned).trim();
+                }
+            }
+
+            // --- WAKE MODE ---
+            if (mode === "wake") {
+                const combined =
+                    (wakeBufferRef.current + " " + interimChunk)
+                        .trim()
+                        .toLowerCase();
+
+                if (combined.includes(WAKE_WORD)) {
+                    // Switch to capture mode and start buffering the prompt
+                    voiceModeRef.current = "capture";
+                    setVoiceMode("capture");
+                    setIsListening(true);
+
+                    // If the wake phrase and prompt were spoken together, keep only the prompt part
+                    const afterWake = stripWakeWord(
+                        (wakeBufferRef.current + " " + interimChunk).trim(),
+                    );
+
+                    // Clear buffers so the prompt doesn't include the wake phrase
+                    wakeBufferRef.current = "";
+                    captureFinalRef.current = afterWake;
+                    captureInterimRef.current = "";
+                    finalTranscriptRef.current = afterWake;
+                    setVoicePreview(afterWake);
+                    clearSilenceTimer();
+                }
+                return;
+            }
+
+            // --- CAPTURE MODE ---
+            captureInterimRef.current = interimChunk;
+            const liveText = stripWakeWord(
+                (captureFinalRef.current + " " + captureInterimRef.current).trim(),
+            );
+
+            finalTranscriptRef.current = liveText;
+            setVoicePreview(liveText);
 
             // Auto-send after the user stops speaking for ~900ms
             clearSilenceTimer();
             silenceTimerRef.current = window.setTimeout(() => {
-                const toSend = finalTranscriptRef.current.trim();
-                if (!toSend) return;
-
-                // Stop listening before sending to avoid restarts/double-sends
-                listeningRef.current = false;
-                setIsListening(false);
-
-                try {
-                    rec.stop();
-                } catch {
-                    // ignore
+                const toSend = stripWakeWord(finalTranscriptRef.current).trim();
+                if (!toSend) {
+                    // User only said the wake word (or nothing meaningful)
+                    resetToWakeMode();
+                    return;
                 }
 
-                // Clear UI preview after stopping
-                setVoicePreview("");
-                finalTranscriptRef.current = "";
-
+                // Send prompt (wake word never included)
                 handleSubmit(toSend);
+
+                // Reset back to wake mode
+                resetToWakeMode();
             }, 900);
         };
 
         rec.onerror = (e: any) => {
             console.error("[voice] recognition error", e);
 
-            // Chrome often throws these while developing; if user still wants to listen, restart.
+            // If user still wants voice enabled, restart after transient errors
+            recognitionRunningRef.current = false;
+
             if (
-                listeningRef.current &&
-                (e?.error === "no-speech" || e?.error === "aborted")
+                voiceEnabledRef.current &&
+                (e?.error === "no-speech" ||
+                    e?.error === "aborted" ||
+                    e?.error === "network")
             ) {
                 try {
                     rec.stop();
@@ -417,14 +566,14 @@ export default function Home() {
                     // ignore
                 }
                 setTimeout(() => {
-                    if (listeningRef.current) {
+                    if (voiceEnabledRef.current) {
                         try {
                             rec.start();
                         } catch {
                             // ignore
                         }
                     }
-                }, 250);
+                }, 300);
                 return;
             }
 
@@ -434,10 +583,14 @@ export default function Home() {
         };
 
         rec.onend = () => {
-            // Chrome ends recognition frequently; restart if we’re still in listening mode
-            if (listeningRef.current) {
+            recognitionRunningRef.current = false;
+
+            // Keep the recognizer running if voice is enabled
+            if (voiceEnabledRef.current && connectionStatus === "connected") {
                 try {
-                    rec.start();
+                    if (!recognitionRunningRef.current) {
+                        rec.start();
+                    }
                 } catch {
                     // ignore
                 }
@@ -446,6 +599,17 @@ export default function Home() {
 
         recognitionRef.current = rec;
 
+        // Auto-start listening once we're connected (wake mode)
+        if (voiceEnabledRef.current && connectionStatus === "connected") {
+            listeningRef.current = true;
+            resetToWakeMode();
+            try {
+                rec.start();
+            } catch {
+                // ignore
+            }
+        }
+
         return () => {
             listeningRef.current = false;
             clearSilenceTimer();
@@ -453,39 +617,51 @@ export default function Home() {
                 rec.onresult = null;
                 rec.onerror = null;
                 rec.onend = null;
+                rec.onstart = null;
                 rec.stop?.();
             } catch {
                 // ignore
             }
             recognitionRef.current = null;
+            recognitionRunningRef.current = false;
         };
-    }, [handleSubmit]);
+        // IMPORTANT: we intentionally depend on connectionStatus + voiceEnabled so auto-start/auto-restart behaves correctly
+    }, [handleSubmit, connectionStatus, voiceEnabled]);
 
     const startVoice = useCallback(() => {
-        if (!speechSupported) return;
-        if (connectionStatus !== "connected") return;
-        if (loading) return;
-
         const rec = recognitionRef.current;
         if (!rec) return;
 
         try {
-            // Reset buffers
+            setVoiceEnabled(true);
+            voiceEnabledRef.current = true;
+
+            // Always start in wake mode (listening for the wake word)
+            voiceModeRef.current = "wake";
+            setVoiceMode("wake");
+            setIsListening(false);
+
+            // Clear buffers
+            wakeBufferRef.current = "";
+            captureFinalRef.current = "";
+            captureInterimRef.current = "";
             finalTranscriptRef.current = "";
             setVoicePreview("");
 
-            listeningRef.current = true;
-            setIsListening(true);
-
-            rec.start?.();
+            if (!recognitionRunningRef.current) {
+                rec.start?.();
+            }
         } catch (e) {
             console.error("[voice] start failed", e);
-            listeningRef.current = false;
             setIsListening(false);
         }
-    }, [speechSupported, connectionStatus, loading]);
+    }, []);
 
     const stopVoice = useCallback(() => {
+        setVoiceEnabled(false);
+        voiceEnabledRef.current = false;
+        setVoiceMode("wake");
+        voiceModeRef.current = "wake";
         listeningRef.current = false;
         setIsListening(false);
 
@@ -493,6 +669,12 @@ export default function Home() {
             window.clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = null;
         }
+
+        setVoicePreview("");
+        finalTranscriptRef.current = "";
+        wakeBufferRef.current = "";
+        captureFinalRef.current = "";
+        captureInterimRef.current = "";
 
         try {
             recognitionRef.current?.stop?.();
@@ -1010,17 +1192,89 @@ export default function Home() {
 
               {/* Queue view */}
               {rightPanelTab === "queue" && (
-                <QueuePanel
-                  currentTrack={currentTrack}
-                  previousTrack={previousTrack}
-                  upNext={upNext}
-                  onReorder={(newOrder) =>
-                    audioService.sendReorderQueue(newOrder)
-                  }
-                  onRemove={(index) =>
-                    audioService.sendRemoveFromQueue(index)
-                  }
-                />
+                <div className="flex-1 min-h-0 flex flex-col relative">
+                  <div className="flex-1 min-h-0">
+                    <QueuePanel
+                      currentTrack={currentTrack}
+                      previousTrack={previousTrack}
+                      upNext={upNext}
+                      onReorder={(newOrder) =>
+                        audioService.sendReorderQueue(newOrder)
+                      }
+                      onRemove={(index) =>
+                        audioService.sendRemoveFromQueue(index)
+                      }
+                    />
+                  </div>
+
+                  {/* EQ/Bass concept UI anchored bottom-right */}
+                  <div className="absolute bottom-4 right-4">
+                    <div className="flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-xl shadow-lg">
+                      <div className="flex flex-col items-center">
+                        <div className="text-[10px] tracking-widest text-white/60 mb-1">
+                          BASS
+                        </div>
+
+                        <button
+                          type="button"
+                          onPointerDown={onKnobPointerDown}
+                          onPointerMove={onKnobPointerMove}
+                          onPointerUp={onKnobPointerUp}
+                          onPointerCancel={onKnobPointerUp}
+                          className="relative w-14 h-14 rounded-full bg-black/30 border border-white/10 shadow-lg cursor-ns-resize touch-none select-none"
+                          style={{ touchAction: "none" }}
+                          aria-label="Bass control (demo)"
+                          title="Drag up/down"
+                        >
+                          <span
+                            className="absolute left-1/2 top-1/2 w-1 h-6 bg-gradient-to-b from-neon-cyan/80 to-primary-500/80 rounded-full"
+                            style={{
+                              transform: `translate(-50%, -95%) rotate(${bassAngle}deg)`,
+                              transformOrigin: "50% 95%",
+                            }}
+                          />
+                          <span className="absolute left-1/2 top-1/2 w-5 h-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/10 border border-white/10" />
+                        </button>
+
+                        <div className="mt-1 text-[10px] text-white/50 tabular-nums">
+                          {isEditingBass ? (
+                            <input
+                              type="number"
+                              value={bassInput}
+                              autoFocus
+                              min={0}
+                              max={100}
+                              onChange={(e) => setBassInput(e.target.value)}
+                              onBlur={() => {
+                                const val = clamp(Number(bassInput) || 0, 0, 100);
+                                setBassLevel(val);
+                                setBassInput(String(val));
+                                setIsEditingBass(false);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") {
+                                  const val = clamp(Number(bassInput) || 0, 0, 100);
+                                  setBassLevel(val);
+                                  setBassInput(String(val));
+                                  setIsEditingBass(false);
+                                }
+                              }}
+                              className="w-10 bg-black/40 border border-white/10 rounded text-center text-white outline-none"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setIsEditingBass(true)}
+                              className="hover:text-white transition"
+                            >
+                              {bassLevel}%
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
 
               {/* Logs view */}
