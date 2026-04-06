@@ -166,9 +166,6 @@ export default function Home() {
 
   // EQ / Bass UI (frontend concept only)
   const [bassLevel, setBassLevel] = useState(50); // 0..100
-  const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
-    null,
-  );
   const [isEditingBass, setIsEditingBass] = useState(false);
   const [bassInput, setBassInput] = useState(String(bassLevel));
 
@@ -184,35 +181,6 @@ export default function Home() {
     }
   }, [bassLevel, audioService]);
 
-  // Map 0..100 => -135deg .. +135deg (classic knob sweep)
-  const bassAngle = -135 + (bassLevel / 100) * 270;
-
-  const onKnobPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    // Capture pointer so we keep receiving move events even if the cursor leaves the knob.
-    try {
-      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-    } catch {
-      // ignore
-    }
-    knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
-  };
-
-  const onKnobPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    if (!knobDragRef.current) return;
-
-    const deltaY = knobDragRef.current.startY - e.clientY; // up = increase
-    const next = knobDragRef.current.startValue + deltaY * 0.35; // sensitivity
-    const clampedVal = clamp(Math.round(next), 0, 100);
-
-    setBassLevel(clampedVal);
-    setBassInput(String(clampedVal));
-  };
-
-  const onKnobPointerUp = () => {
-    knobDragRef.current = null;
-  };
 
   const addToast = useCallback(
     (message: string, type: "error" | "info" | "success" = "info") => {
@@ -685,6 +653,94 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <style>{`
+        .bass-vertical-slider {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 88px;
+        height: 18px;
+        background: transparent;
+        cursor: pointer;
+        transform: rotate(-90deg);
+        transform-origin: center;
+        }
+
+        .bass-vertical-slider::-webkit-slider-runnable-track {
+        height: 6px;
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.12);
+        }
+
+        .bass-vertical-slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 9999px;
+        background: linear-gradient(180deg, rgba(34,211,238,1) 0%, rgba(139,92,246,1) 100%);
+        border: 2px solid rgba(255,255,255,0.65);
+        box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+        margin-top: -6px;
+        }
+
+        .bass-vertical-slider::-moz-range-track {
+        height: 6px;
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.12);
+        }
+
+        .bass-vertical-slider::-moz-range-thumb {
+        width: 18px;
+        height: 18px;
+        border-radius: 9999px;
+        background: linear-gradient(180deg, rgba(34,211,238,1) 0%, rgba(139,92,246,1) 100%);
+        border: 2px solid rgba(255,255,255,0.65);
+        box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
+        }
+
+        .eq-placeholder-slider {
+          width: 88px;
+          height: 18px;
+          transform: rotate(-90deg);
+          transform-origin: center;
+          opacity: 0.35;
+          pointer-events: none;
+          accent-color: rgba(255, 255, 255, 0.35);
+        }
+
+        .eq-placeholder-slider::-webkit-slider-runnable-track {
+          height: 6px;
+          border-radius: 9999px;
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .eq-placeholder-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 16px;
+          height: 16px;
+          border-radius: 9999px;
+          background: rgba(255, 255, 255, 0.45);
+          border: 2px solid rgba(255,255,255,0.25);
+          box-shadow: none;
+          margin-top: -5px;
+        }
+
+        .eq-placeholder-slider::-moz-range-track {
+          height: 6px;
+          border-radius: 9999px;
+          background: rgba(255, 255, 255, 0.08);
+        }
+
+        .eq-placeholder-slider::-moz-range-thumb {
+          width: 16px;
+          height: 16px;
+          border-radius: 9999px;
+          background: rgba(255, 255, 255, 0.45);
+          border: 2px solid rgba(255,255,255,0.25);
+          box-shadow: none;
+        }
+      `}</style>
       {/* Toast notifications */}
       {toasts.length > 0 && (
         <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
@@ -1208,35 +1264,72 @@ export default function Home() {
                   </div>
 
                   {/* EQ/Bass concept UI anchored bottom-right */}
-                  <div className="absolute bottom-4 right-4">
-                    <div className="flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-xl shadow-lg">
-                      <div className="flex flex-col items-center">
-                        <div className="text-[10px] tracking-widest text-white/60 mb-1">
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[270px] max-w-[calc(100%-2rem)]">
+                    <div className="flex items-end justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-3 py-3 backdrop-blur-xl shadow-lg w-full max-w-full overflow-hidden">
+                      <div className="flex flex-col items-center opacity-45 w-[56px]">
+                        <div className="text-[9px] tracking-widest text-white/35 mb-2">
+                          #
+                        </div>
+                        <div className="h-28 flex items-center justify-center overflow-hidden w-full">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value="72"
+                            readOnly
+                            tabIndex={-1}
+                            className="eq-placeholder-slider"
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className="mt-2 text-[9px] text-white/25">--</div>
+                      </div>
+
+                      <div className="flex flex-col items-center opacity-45 w-[56px]">
+                        <div className="text-[9px] tracking-widest text-white/35 mb-2">
+                          #
+                        </div>
+                        <div className="h-28 flex items-center justify-center overflow-hidden w-full">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value="38"
+                            readOnly
+                            tabIndex={-1}
+                            className="eq-placeholder-slider"
+                            aria-hidden="true"
+                          />
+                        </div>
+                        <div className="mt-2 text-[9px] text-white/25">--</div>
+                      </div>
+
+                      <div className="flex flex-col items-center rounded-xl bg-white/5 px-2 py-2 w-[64px] shrink-0">
+                        <div className="text-[9px] tracking-widest text-white/60 mb-2">
                           BASS
                         </div>
 
-                        <button
-                          type="button"
-                          onPointerDown={onKnobPointerDown}
-                          onPointerMove={onKnobPointerMove}
-                          onPointerUp={onKnobPointerUp}
-                          onPointerCancel={onKnobPointerUp}
-                          className="relative w-14 h-14 rounded-full bg-black/30 border border-white/10 shadow-lg cursor-ns-resize touch-none select-none"
-                          style={{ touchAction: "none" }}
-                          aria-label="Bass control (demo)"
-                          title="Drag up/down"
-                        >
-                          <span
-                            className="absolute left-1/2 top-1/2 w-1 h-6 bg-gradient-to-b from-neon-cyan/80 to-primary-500/80 rounded-full"
-                            style={{
-                              transform: `translate(-50%, -95%) rotate(${bassAngle}deg)`,
-                              transformOrigin: "50% 95%",
+                        <div className="h-28 flex items-center justify-center overflow-hidden w-full">
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="1"
+                            value={bassLevel}
+                            onChange={(e) => {
+                              const val = clamp(Number(e.target.value), 0, 100);
+                              setBassLevel(val);
+                              setBassInput(String(val));
                             }}
+                            className="bass-vertical-slider"
+                            aria-label="Bass control"
+                            title="Bass control"
                           />
-                          <span className="absolute left-1/2 top-1/2 w-5 h-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/10 border border-white/10" />
-                        </button>
+                        </div>
 
-                        <div className="mt-1 text-[10px] text-white/50 tabular-nums">
+                        <div className="mt-2 text-[9px] text-white/50 tabular-nums">
                           {isEditingBass ? (
                             <input
                               type="number"
