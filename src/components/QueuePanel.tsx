@@ -1,5 +1,5 @@
 // src/components/QueuePanel.tsx
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -89,7 +89,7 @@ function SortableQueueItem({ id, track, index, onRemove }: { id: string; track: 
   );
 }
 
-export default function QueuePanel({ currentTrack, previousTrack, upNext, onReorder, onRemove }: Props) {
+function QueuePanel({ currentTrack, previousTrack, upNext, onReorder, onRemove }: Props) {
   const [localUpNext, setLocalUpNext] = useState<TrackInfoType[]>([]);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -202,3 +202,5 @@ export default function QueuePanel({ currentTrack, previousTrack, upNext, onReor
     </div>
   );
 }
+
+export default memo(QueuePanel);

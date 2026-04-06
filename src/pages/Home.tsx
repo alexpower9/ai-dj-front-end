@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import LibrarySidebar from "../components/LibrarySidebar";
 import PromptBox from "../components/PromptBox";
 import Waveform from "../components/Waveform";
 import PlaybackTimeline from "../components/PlaybackTimeline";
-import QueuePanel from "../components/QueuePanel";
+import RightPanel from "../components/RightPanel";
 import TrackInfo from "../components/TrackInfo";
 import TransitionInfo from "../components/TransitionInfo";
+import VolumeControl from "../components/VolumeControl";
 import {
     AudioStreamService,
     type TrackInfo as TrackInfoType,
@@ -16,14 +18,11 @@ import {
     MicVocal,
     Mic,
     MicOff,
-    ChevronLeft,
-    ChevronRight,
+    LogIn,
     UserCircle,
     Play,
     Pause,
     SkipForward,
-    Volume2,
-    VolumeX,
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
 import { useAuth } from "../context/AuthContext";
@@ -37,12 +36,16 @@ type LibrarySong = {
     scale?: string;
 };
 
+const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+
 export default function Home() {
     const navigate = useNavigate();
     const location = useLocation();
     const { isAuthenticated, token, user } = useAuth();
     const [audioService] = useState(() => new AudioStreamService());
     const [loading, setLoading] = useState(false);
+    const guestMenuRef = useRef<HTMLDivElement | null>(null);
     const setlistId = (location.state as { setlistId?: string } | null)
         ?.setlistId;
 
@@ -86,6 +89,7 @@ export default function Home() {
 
   //Upload Song State
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showGuestLoginMenu, setShowGuestLoginMenu] = useState(false);
 
   // Library sidebar collapse state
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
@@ -107,6 +111,58 @@ export default function Home() {
   const listeningRef = useRef(false);
   const silenceTimerRef = useRef<number | null>(null);
   const finalTranscriptRef = useRef("");
+  // Wake-word voice control
+  const WAKE_WORD = "hey tempo";
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceMode, setVoiceMode] = useState<"wake" | "capture">("wake");
+  const voiceEnabledRef = useRef(true);
+  const voiceModeRef = useRef<"wake" | "capture">("wake");
+
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+  }, [voiceEnabled]);
+
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      setShowGuestLoginMenu(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!showGuestLoginMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        guestMenuRef.current &&
+        !guestMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowGuestLoginMenu(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGuestLoginMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showGuestLoginMenu]);
+
+  const wakeBufferRef = useRef("");
+  const captureFinalRef = useRef("");
+  const captureInterimRef = useRef("");
+  const recognitionRunningRef = useRef(false);
   const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
   const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
@@ -137,13 +193,61 @@ export default function Home() {
   // Backend log state
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
   const [rightPanelTab, setRightPanelTab] = useState<"queue" | "logs">("queue");
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const deferredBackendLogs = useDeferredValue(backendLogs);
+  const pendingLogLinesRef = useRef<string[]>([]);
+  const logFlushTimerRef = useRef<number | null>(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState<
     { id: number; message: string; type: "error" | "info" | "success" }[]
   >([]);
   const toastIdRef = useRef(0);
+
+  // EQ / Bass UI (frontend concept only)
+  const [bassLevel, setBassLevel] = useState(50); // 0..100
+  const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
+    null,
+  );
+  const [isEditingBass, setIsEditingBass] = useState(false);
+  const [bassInput, setBassInput] = useState(String(bassLevel));
+
+  // Push bass UI value into WebAudio (client-side) whenever it changes
+  useEffect(() => {
+    try {
+      (audioService as any).setBass?.(bassLevel);
+    } catch (e) {
+      console.warn("setBass failed:", e);
+    }
+  }, [bassLevel, audioService]);
+
+  // Map 0..100 => -135deg .. +135deg (classic knob sweep)
+  const bassAngle = -135 + (bassLevel / 100) * 270;
+
+  const onKnobPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {
+      // ignore
+    }
+    knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
+  }, [bassLevel]);
+
+  const onKnobPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (!knobDragRef.current) return;
+
+    const deltaY = knobDragRef.current.startY - e.clientY;
+    const next = knobDragRef.current.startValue + deltaY * 0.35;
+    const clampedVal = clamp(Math.round(next), 0, 100);
+
+    setBassLevel(clampedVal);
+    setBassInput(String(clampedVal));
+  }, []);
+
+  const onKnobPointerUp = useCallback(() => {
+    knobDragRef.current = null;
+  }, []);
 
   const addToast = useCallback(
     (message: string, type: "error" | "info" | "success" = "info") => {
@@ -155,6 +259,28 @@ export default function Home() {
     },
     [],
   );
+
+  const flushBufferedLogs = useCallback(() => {
+    logFlushTimerRef.current = null;
+
+    if (pendingLogLinesRef.current.length === 0) return;
+
+    const nextLines = pendingLogLinesRef.current;
+    pendingLogLinesRef.current = [];
+
+    setBackendLogs((prev) => {
+      const updated = [...prev, ...nextLines];
+      return updated.length > 200 ? updated.slice(-200) : updated;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (logFlushTimerRef.current !== null) {
+        window.clearTimeout(logFlushTimerRef.current);
+      }
+    };
+  }, []);
 
   const trackKey = (t: TrackInfoType | null) =>
     t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
@@ -272,14 +398,10 @@ export default function Home() {
         // don't clear here; onTrackStart will clean it up
       },
       onBackendLog: (lines) => {
-        setBackendLogs((prev) => {
-          const updated = [...prev, ...lines];
-          return updated.length > 200 ? updated.slice(-200) : updated;
-        });
-        // Auto-scroll to bottom
-        requestAnimationFrame(() => {
-          logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        });
+        pendingLogLinesRef.current.push(...lines);
+        if (logFlushTimerRef.current === null) {
+          logFlushTimerRef.current = window.setTimeout(flushBufferedLogs, 80);
+        }
       },
     });
 
@@ -311,7 +433,7 @@ export default function Home() {
     return () => {
       audioService.disconnect();
     };
-  }, [addToast, audioService, refreshLibrary, setlistId, token]);
+  }, [addToast, audioService, flushBufferedLogs, refreshLibrary, setlistId, token]);
 
     const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
@@ -348,7 +470,9 @@ export default function Home() {
         [connectionStatus, audioService],
     );
 
-    // Set up speech recognition once (stable instance) + auto-send after brief silence
+    // Set up speech recognition once (stable instance)
+    // Wake mode: always listens for "hey tempo"
+    // Capture mode: after wake word, captures a prompt and auto-sends after brief silence
     useEffect(() => {
         const SpeechRecognition: undefined | (new () => any) =
             (window as any).SpeechRecognition ||
@@ -359,7 +483,7 @@ export default function Home() {
         const rec = new SpeechRecognition();
         rec.lang = "en-US";
         rec.interimResults = true;
-        rec.continuous = true; // IMPORTANT: don't stop after the first word
+        rec.continuous = true;
         rec.maxAlternatives = 1;
 
         const clearSilenceTimer = () => {
@@ -369,47 +493,125 @@ export default function Home() {
             }
         };
 
-        rec.onresult = (event: any) => {
-            // Build transcript from all results so it keeps updating smoothly
-            const text = Array.from(event.results)
-                .map((r: any) => r?.[0]?.transcript ?? "")
-                .join("")
+        const stripWakeWord = (text: string) => {
+            // Remove wake word from any transcript before sending/previewing
+            const cleaned = (text || "")
+                .replace(/\bhey\s+tempo\b/gi, " ")
+                .replace(/\s+/g, " ")
                 .trim();
+            return cleaned;
+        };
 
-            finalTranscriptRef.current = text;
-            setVoicePreview(text);
+        const resetToWakeMode = () => {
+            setVoiceMode("wake");
+            voiceModeRef.current = "wake";
+            setIsListening(false);
+            setVoicePreview("");
+            wakeBufferRef.current = "";
+            captureFinalRef.current = "";
+            captureInterimRef.current = "";
+            finalTranscriptRef.current = "";
+            clearSilenceTimer();
+        };
+
+        rec.onstart = () => {
+            recognitionRunningRef.current = true;
+        };
+
+        rec.onresult = (event: any) => {
+            const mode = voiceModeRef.current;
+            // Process only new results to avoid re-building the entire transcript every time.
+            let interimChunk = "";
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const txt = (event.results[i]?.[0]?.transcript ?? "").trim();
+                if (!txt) continue;
+
+                if (event.results[i].isFinal) {
+                    if (mode === "capture") {
+                        const cleaned = stripWakeWord(txt);
+                        if (cleaned) {
+                            captureFinalRef.current =
+                                (captureFinalRef.current + " " + cleaned).trim();
+                        }
+                    } else {
+                        wakeBufferRef.current =
+                            (wakeBufferRef.current + " " + txt).trim();
+                    }
+                } else {
+                    // Keep interim for live preview, but never include the wake word
+                    const interimCleaned =
+                        mode === "capture" ? stripWakeWord(txt) : txt;
+                    interimChunk = (interimChunk + " " + interimCleaned).trim();
+                }
+            }
+
+            // --- WAKE MODE ---
+            if (mode === "wake") {
+                const combined =
+                    (wakeBufferRef.current + " " + interimChunk)
+                        .trim()
+                        .toLowerCase();
+
+                if (combined.includes(WAKE_WORD)) {
+                    // Switch to capture mode and start buffering the prompt
+                    voiceModeRef.current = "capture";
+                    setVoiceMode("capture");
+                    setIsListening(true);
+
+                    // If the wake phrase and prompt were spoken together, keep only the prompt part
+                    const afterWake = stripWakeWord(
+                        (wakeBufferRef.current + " " + interimChunk).trim(),
+                    );
+
+                    // Clear buffers so the prompt doesn't include the wake phrase
+                    wakeBufferRef.current = "";
+                    captureFinalRef.current = afterWake;
+                    captureInterimRef.current = "";
+                    finalTranscriptRef.current = afterWake;
+                    setVoicePreview(afterWake);
+                    clearSilenceTimer();
+                }
+                return;
+            }
+
+            // --- CAPTURE MODE ---
+            captureInterimRef.current = interimChunk;
+            const liveText = stripWakeWord(
+                (captureFinalRef.current + " " + captureInterimRef.current).trim(),
+            );
+
+            finalTranscriptRef.current = liveText;
+            setVoicePreview(liveText);
 
             // Auto-send after the user stops speaking for ~900ms
             clearSilenceTimer();
             silenceTimerRef.current = window.setTimeout(() => {
-                const toSend = finalTranscriptRef.current.trim();
-                if (!toSend) return;
-
-                // Stop listening before sending to avoid restarts/double-sends
-                listeningRef.current = false;
-                setIsListening(false);
-
-                try {
-                    rec.stop();
-                } catch {
-                    // ignore
+                const toSend = stripWakeWord(finalTranscriptRef.current).trim();
+                if (!toSend) {
+                    // User only said the wake word (or nothing meaningful)
+                    resetToWakeMode();
+                    return;
                 }
 
-                // Clear UI preview after stopping
-                setVoicePreview("");
-                finalTranscriptRef.current = "";
-
+                // Send prompt (wake word never included)
                 handleSubmit(toSend);
+
+                // Reset back to wake mode
+                resetToWakeMode();
             }, 900);
         };
 
         rec.onerror = (e: any) => {
             console.error("[voice] recognition error", e);
 
-            // Chrome often throws these while developing; if user still wants to listen, restart.
+            // If user still wants voice enabled, restart after transient errors
+            recognitionRunningRef.current = false;
+
             if (
-                listeningRef.current &&
-                (e?.error === "no-speech" || e?.error === "aborted")
+                voiceEnabledRef.current &&
+                (e?.error === "no-speech" ||
+                    e?.error === "aborted" ||
+                    e?.error === "network")
             ) {
                 try {
                     rec.stop();
@@ -417,14 +619,14 @@ export default function Home() {
                     // ignore
                 }
                 setTimeout(() => {
-                    if (listeningRef.current) {
+                    if (voiceEnabledRef.current) {
                         try {
                             rec.start();
                         } catch {
                             // ignore
                         }
                     }
-                }, 250);
+                }, 300);
                 return;
             }
 
@@ -434,10 +636,14 @@ export default function Home() {
         };
 
         rec.onend = () => {
-            // Chrome ends recognition frequently; restart if we’re still in listening mode
-            if (listeningRef.current) {
+            recognitionRunningRef.current = false;
+
+            // Keep the recognizer running if voice is enabled
+            if (voiceEnabledRef.current && connectionStatus === "connected") {
                 try {
-                    rec.start();
+                    if (!recognitionRunningRef.current) {
+                        rec.start();
+                    }
                 } catch {
                     // ignore
                 }
@@ -446,6 +652,17 @@ export default function Home() {
 
         recognitionRef.current = rec;
 
+        // Auto-start listening once we're connected (wake mode)
+        if (voiceEnabledRef.current && connectionStatus === "connected") {
+            listeningRef.current = true;
+            resetToWakeMode();
+            try {
+                rec.start();
+            } catch {
+                // ignore
+            }
+        }
+
         return () => {
             listeningRef.current = false;
             clearSilenceTimer();
@@ -453,39 +670,51 @@ export default function Home() {
                 rec.onresult = null;
                 rec.onerror = null;
                 rec.onend = null;
+                rec.onstart = null;
                 rec.stop?.();
             } catch {
                 // ignore
             }
             recognitionRef.current = null;
+            recognitionRunningRef.current = false;
         };
-    }, [handleSubmit]);
+        // IMPORTANT: we intentionally depend on connectionStatus + voiceEnabled so auto-start/auto-restart behaves correctly
+    }, [handleSubmit, connectionStatus, voiceEnabled]);
 
     const startVoice = useCallback(() => {
-        if (!speechSupported) return;
-        if (connectionStatus !== "connected") return;
-        if (loading) return;
-
         const rec = recognitionRef.current;
         if (!rec) return;
 
         try {
-            // Reset buffers
+            setVoiceEnabled(true);
+            voiceEnabledRef.current = true;
+
+            // Always start in wake mode (listening for the wake word)
+            voiceModeRef.current = "wake";
+            setVoiceMode("wake");
+            setIsListening(false);
+
+            // Clear buffers
+            wakeBufferRef.current = "";
+            captureFinalRef.current = "";
+            captureInterimRef.current = "";
             finalTranscriptRef.current = "";
             setVoicePreview("");
 
-            listeningRef.current = true;
-            setIsListening(true);
-
-            rec.start?.();
+            if (!recognitionRunningRef.current) {
+                rec.start?.();
+            }
         } catch (e) {
             console.error("[voice] start failed", e);
-            listeningRef.current = false;
             setIsListening(false);
         }
-    }, [speechSupported, connectionStatus, loading]);
+    }, []);
 
     const stopVoice = useCallback(() => {
+        setVoiceEnabled(false);
+        voiceEnabledRef.current = false;
+        setVoiceMode("wake");
+        voiceModeRef.current = "wake";
         listeningRef.current = false;
         setIsListening(false);
 
@@ -494,12 +723,78 @@ export default function Home() {
             silenceTimerRef.current = null;
         }
 
+        setVoicePreview("");
+        finalTranscriptRef.current = "";
+        wakeBufferRef.current = "";
+        captureFinalRef.current = "";
+        captureInterimRef.current = "";
+
         try {
             recognitionRef.current?.stop?.();
         } catch (e) {
             console.error("[voice] stop failed", e);
         }
     }, []);
+
+    const collapseLibrary = useCallback(() => {
+        setIsLibraryCollapsed(true);
+    }, []);
+
+    const expandLibrary = useCallback(() => {
+        setIsLibraryCollapsed(false);
+    }, []);
+
+    const handleLibrarySongSelect = useCallback((title: string, artist: string) => {
+        const prettyPrompt = artist ? `play ${title} by ${artist}` : `play ${title}`;
+        handleSubmit(prettyPrompt);
+    }, [handleSubmit]);
+
+    const handleQueueReorder = useCallback((newOrder: number[]) => {
+        audioService.sendReorderQueue(newOrder);
+    }, [audioService]);
+
+    const handleQueueRemove = useCallback((index: number) => {
+        audioService.sendRemoveFromQueue(index);
+    }, [audioService]);
+
+    const handleRightPanelTabChange = useCallback((tab: "queue" | "logs") => {
+        setRightPanelTab(tab);
+    }, []);
+
+    const handleBassInputChange = useCallback((value: string) => {
+        setBassInput(value);
+    }, []);
+
+    const commitBassInput = useCallback(() => {
+        const val = clamp(Number(bassInput) || 0, 0, 100);
+        setBassLevel(val);
+        setBassInput(String(val));
+        setIsEditingBass(false);
+    }, [bassInput]);
+
+    const handleBassInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") {
+            commitBassInput();
+        }
+    }, [commitBassInput]);
+
+    const startBassEditing = useCallback(() => {
+        setIsEditingBass(true);
+    }, []);
+
+    const handleAccountButtonClick = useCallback(() => {
+        if (isAuthenticated) {
+            navigate("/account");
+            return;
+        }
+
+        setShowGuestLoginMenu((prev) => !prev);
+    }, [isAuthenticated, navigate]);
+
+    const handleGuestLoginClick = useCallback(() => {
+        setShowGuestLoginMenu(false);
+        navigate("/login");
+    }, [navigate]);
 
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -527,21 +822,41 @@ export default function Home() {
       )}
 
       {/* User account icon */}
-      <button
-        onClick={() => isAuthenticated && navigate('/account')}
-        title={
-          isAuthenticated
-            ? `Signed in as ${user?.username}`
-            : "Guest — sign in to access your account"
-        }
-        className={`absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-          isAuthenticated
-            ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
-            : "bg-white/5 border border-white/10 opacity-50 cursor-default"
-        }`}
-      >
-        <UserCircle className="w-5 h-5 text-white/80" />
-      </button>
+      <div ref={guestMenuRef} className="absolute top-4 left-4 z-20">
+        <button
+          onClick={handleAccountButtonClick}
+          title={
+            isAuthenticated
+              ? `Signed in as ${user?.username}`
+              : "Guest mode - open sign in options"
+          }
+          aria-expanded={!isAuthenticated && showGuestLoginMenu}
+          aria-haspopup={!isAuthenticated ? "menu" : undefined}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+            isAuthenticated
+              ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+              : "bg-white/10 border border-white/15 hover:bg-white/15 hover:border-white/25 cursor-pointer"
+          }`}
+        >
+          <UserCircle className="w-5 h-5 text-white/80" />
+        </button>
+
+        {!isAuthenticated && showGuestLoginMenu && (
+          <div className="mt-3 w-44 rounded-2xl border border-white/10 bg-[#120922]/95 p-3 shadow-2xl backdrop-blur-xl">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">
+              Guest Mode
+            </p>
+            <button
+              type="button"
+              onClick={handleGuestLoginClick}
+              className="mt-3 w-full rounded-xl bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-500 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              Log In
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Add Upload Button */}
       <button
@@ -606,109 +921,17 @@ export default function Home() {
       >
         {/* Left sidebar: Library */}
         {isPlaying && (
-          <aside
-            className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
-              isLibraryCollapsed ? "w-10" : "w-[340px] xl:w-[360px]"
-            }`}
-          >
-            <div
-              className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? "p-0" : "p-4"}`}
-            >
-              {isLibraryCollapsed ? (
-                /* Collapsed: just the expand button */
-                <button
-                  type="button"
-                  onClick={() => setIsLibraryCollapsed(false)}
-                  className="w-full h-full flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                  title="Expand library"
-                >
-                  <ChevronRight className="w-6 h-6" />
-                </button>
-              ) : (
-                /* Expanded: full panel */
-                <>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-xs font-semibold tracking-widest text-gray-300">
-                      LIBRARY
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={refreshLibrary}
-                        className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
-                      >
-                        {libraryLoading ? "Loading…" : "Refresh"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsLibraryCollapsed(true)}
-                        className="text-gray-400 hover:text-gray-200 transition-colors"
-                        title="Collapse library"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {libraryError && (
-                    <div className="text-xs text-red-300 mb-2 truncate">
-                      {libraryError}
-                    </div>
-                  )}
-
-                  <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
-                    {librarySongs.length === 0 && !libraryLoading ? (
-                      <div className="text-sm text-gray-500">
-                        No songs found.
-                      </div>
-                    ) : (
-                      librarySongs.map((s: any, idx: number) => {
-                        const title =
-                          s?.title ??
-                          s?.name ??
-                          s?.song_name ??
-                          s?.id ??
-                          "Untitled";
-                        const artist = s?.artist ?? "";
-                        const bpm =
-                          typeof s?.bpm === "number" ? Math.round(s.bpm) : null;
-                        const key = s?.key ?? "";
-                        const scale = s?.scale ?? "";
-
-                        const prettyPrompt = artist
-                          ? `play ${title} by ${artist}`
-                          : `play ${title}`;
-
-                        const keyStr =
-                          `${key}${scale ? ` ${scale}` : ""}`.trim();
-
-                        return (
-                          <button
-                            key={s?.id ?? `${title}::${artist}::${idx}`}
-                            type="button"
-                            disabled={
-                              connectionStatus !== "connected" || loading
-                            }
-                            onClick={() => handleSubmit(prettyPrompt)}
-                            className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
-                          >
-                            <div className="text-sm text-white/90 font-medium truncate">
-                              {title}
-                            </div>
-                            <div className="text-xs text-gray-400 truncate">
-                              {artist}
-                              {bpm ? ` • ${bpm} BPM` : ""}
-                              {keyStr ? ` • ${keyStr}` : ""}
-                            </div>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </aside>
+          <LibrarySidebar
+            isCollapsed={isLibraryCollapsed}
+            librarySongs={librarySongs}
+            libraryLoading={libraryLoading}
+            libraryError={libraryError}
+            disabled={connectionStatus !== "connected" || loading}
+            onRefresh={refreshLibrary}
+            onCollapse={collapseLibrary}
+            onExpand={expandLibrary}
+            onSelectSong={handleLibrarySongSelect}
+          />
         )}
         {/* Left column */}
         <div
@@ -933,37 +1156,13 @@ export default function Home() {
                   </button>
 
                   {/* Volume slider */}
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newVol = volume > 0 ? 0 : 1;
-                        setVolume(newVol);
-                        audioService.setVolume(newVol);
-                      }}
-                      className="text-white/60 hover:text-white transition-colors shrink-0 cursor-pointer"
-                      title={volume === 0 ? "Unmute" : "Mute"}
-                    >
-                      {volume === 0 ? (
-                        <VolumeX className="w-4 h-4" />
-                      ) : (
-                        <Volume2 className="w-4 h-4" />
-                      )}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={volume}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        setVolume(v);
-                        audioService.setVolume(v);
-                      }}
-                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-primary-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-400"
-                    />
-                  </div>
+                  <VolumeControl
+                    volume={volume}
+                    onVolumeChange={(v) => {
+                      setVolume(v);
+                      audioService.setVolume(v);
+                    }}
+                  />
                 </div>
               </div>
             )}
@@ -980,82 +1179,27 @@ export default function Home() {
 
         {/* Right column: full queue */}
         {isPlaying && (
-          <aside className="w-full lg:w-[360px] flex-shrink-0 flex flex-col">
-            <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4 flex flex-col">
-              {/* Tab toggle */}
-              <div className="flex mb-3 bg-black/20 rounded-lg p-0.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setRightPanelTab("queue")}
-                  className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === "queue"
-                      ? "bg-white/10 text-white"
-                      : "text-white/40 hover:text-white/60"
-                  }`}
-                >
-                  Queue
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightPanelTab("logs")}
-                  className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === "logs"
-                      ? "bg-white/10 text-white"
-                      : "text-white/40 hover:text-white/60"
-                  }`}
-                >
-                  Logs
-                </button>
-              </div>
-
-              {/* Queue view */}
-              {rightPanelTab === "queue" && (
-                <QueuePanel
-                  currentTrack={currentTrack}
-                  previousTrack={previousTrack}
-                  upNext={upNext}
-                  onReorder={(newOrder) =>
-                    audioService.sendReorderQueue(newOrder)
-                  }
-                  onRemove={(index) =>
-                    audioService.sendRemoveFromQueue(index)
-                  }
-                />
-              )}
-
-              {/* Logs view */}
-              {rightPanelTab === "logs" && (
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 overflow-y-auto library-scroll rounded-lg bg-black/30 border border-white/5 p-3 font-mono text-[11px] leading-relaxed text-white/60">
-                    {backendLogs.length === 0 ? (
-                      <p className="text-white/20 italic">No logs yet...</p>
-                    ) : (
-                      backendLogs.map((line, i) => (
-                        <div
-                          key={i}
-                          className={`py-0.5 ${
-                            line.includes("ERROR") || line.includes("Error")
-                              ? "text-red-400"
-                              : line.includes("[WS]")
-                                ? "text-neon-cyan/70"
-                                : line.includes("[QUEUE]")
-                                  ? "text-neon-green/70"
-                                  : line.includes("[TRANSITION]") ||
-                                      line.includes("[DEBUG]")
-                                    ? "text-neon-purple/70"
-                                    : ""
-                          }`}
-                        >
-                          {line}
-                        </div>
-                      ))
-                    )}
-                    <div ref={logEndRef} />
-                  </div>
-                </div>
-              )}
-            </div>
-          </aside>
+          <RightPanel
+            rightPanelTab={rightPanelTab}
+            onTabChange={handleRightPanelTabChange}
+            currentTrack={currentTrack}
+            previousTrack={previousTrack}
+            upNext={upNext}
+            onReorder={handleQueueReorder}
+            onRemove={handleQueueRemove}
+            backendLogs={deferredBackendLogs}
+            bassLevel={bassLevel}
+            bassAngle={bassAngle}
+            isEditingBass={isEditingBass}
+            bassInput={bassInput}
+            onBassInputChange={handleBassInputChange}
+            onBassInputCommit={commitBassInput}
+            onBassInputKeyDown={handleBassInputKeyDown}
+            onBassEditStart={startBassEditing}
+            onKnobPointerDown={onKnobPointerDown}
+            onKnobPointerMove={onKnobPointerMove}
+            onKnobPointerUp={onKnobPointerUp}
+          />
         )}
       </div>
     </div>

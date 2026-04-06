@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { memo, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { ArrowRightIcon, Loader2 } from 'lucide-react';
 
@@ -10,7 +10,7 @@ interface PromptBoxProps {
   rightAccessory?: React.ReactNode;
 }
 
-export default function PromptBox({ onSubmit, loading = false, disabled = false, rightAccessory }: PromptBoxProps) {
+function PromptBox({ onSubmit, loading = false, disabled = false, rightAccessory }: PromptBoxProps) {
   const [prompt, setPrompt] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -76,3 +76,5 @@ export default function PromptBox({ onSubmit, loading = false, disabled = false,
     </form>
   );
 }
+
+export default memo(PromptBox);

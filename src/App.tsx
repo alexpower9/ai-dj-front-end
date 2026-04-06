@@ -20,7 +20,7 @@ function AppRoutes() {
 
   return (
     <Routes>
-      <Route path="/login" element={hasAccess ? <Navigate to="/dj" replace /> : <Login />} />
+      <Route path="/login" element={isAuthenticated ? <Navigate to="/dj" replace /> : <Login />} />
       <Route path="/dj" element={hasAccess ? <Home /> : <Navigate to="/login" replace />} />
       <Route path="/account" element={isAuthenticated ? <AccountPage /> : <Navigate to="/dj" replace />} />
       <Route path="/mixer" element={isAuthenticated ? <Mixer /> : <Navigate to="/dj" replace />} />

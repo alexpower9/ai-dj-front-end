@@ -44,6 +44,7 @@ import {
   type Setlist,
   type SetlistItem,
 } from '../services/setlistApi';
+import VolumeControl from '../components/VolumeControl';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -327,8 +328,11 @@ export default function Mixer() {
   // Audio preview
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [previewState, setPreviewState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const [previewVolume, setPreviewVolume] = useState(1);
   const audioContextRef = useRef<AudioContext | null>(null);
   const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
+  const previewVolumeRef = useRef(1);
 
   // DnD sensors
   const sensors = useSensors(
@@ -361,11 +365,19 @@ export default function Mixer() {
         const map = new Map<string, SongSegment[]>();
         for (const song of songs) {
           const segs = song.segments ?? [];
-          const key = (song.title ?? '').toLowerCase().replace(/-/g, ' ').replace(/_/g, ' ').trim();
-          if (segs.length > 0) {
-            map.set(key, segs);
+          if (segs.length === 0) continue;
+
+          const normalizedTitle = (song.title ?? '').toLowerCase().replace(/-/g, ' ').replace(/_/g, ' ').trim();
+
+          // Setlists persist the backend song_key, so keep that as the primary lookup.
+          if (song.song_key) {
+            map.set(song.song_key, segs);
           }
-          // Also map the raw title for direct matches
+
+          // Keep title-based fallbacks for older local state and any direct title lookups.
+          if (normalizedTitle) {
+            map.set(normalizedTitle, segs);
+          }
           if (song.title) {
             map.set(song.title, segs);
           }
@@ -589,6 +601,16 @@ export default function Mixer() {
     setPreviewIndex(null);
   }, []);
 
+  const handlePreviewVolumeChange = useCallback((value: number) => {
+    const clamped = Math.max(0, Math.min(1, value));
+    previewVolumeRef.current = clamped;
+    setPreviewVolume(clamped);
+
+    if (gainNodeRef.current) {
+      gainNodeRef.current.gain.value = clamped;
+    }
+  }, []);
+
   const handlePreview = async (index: number) => {
     if (!token || index >= setlistItems.length - 1) return;
 
@@ -622,6 +644,13 @@ export default function Mixer() {
       }
       const ctx = audioContextRef.current;
 
+      if (!gainNodeRef.current || gainNodeRef.current.context !== ctx) {
+        const gainNode = ctx.createGain();
+        gainNode.gain.value = previewVolumeRef.current;
+        gainNode.connect(ctx.destination);
+        gainNodeRef.current = gainNode;
+      }
+
       // Decode PCM int16 to float32
       const int16Array = new Int16Array(audioBuffer);
       const float32Array = new Float32Array(int16Array.length);
@@ -636,7 +665,7 @@ export default function Mixer() {
       // Play
       const source = ctx.createBufferSource();
       source.buffer = buffer;
-      source.connect(ctx.destination);
+      source.connect(gainNodeRef.current);
       source.onended = () => {
         setPreviewState('idle');
         setPreviewIndex(null);
@@ -690,6 +719,14 @@ export default function Mixer() {
         <div className="flex gap-6 flex-col lg:flex-row">
           {/* Left: Saved setlists */}
           <div className="lg:w-[280px] shrink-0">
+            <div className="mb-4 rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl">
+              <VolumeControl
+                volume={previewVolume}
+                onVolumeChange={handlePreviewVolumeChange}
+                className="w-full"
+              />
+            </div>
+
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-semibold tracking-widest text-white/40 uppercase">
                 Setlists
