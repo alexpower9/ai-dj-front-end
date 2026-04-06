@@ -4,6 +4,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import AccountPage from './pages/Account';
 import Mixer from './pages/Mixer';
+import RemoteControl from './pages/RemoteControl';
 
 function AppRoutes() {
   const { isAuthenticated, isGuest, isLoading } = useAuth();
@@ -20,6 +21,7 @@ function AppRoutes() {
 
   return (
     <Routes>
+      <Route path="/remote" element={<RemoteControl />} />
       <Route path="/login" element={isAuthenticated ? <Navigate to="/dj" replace /> : <Login />} />
       <Route path="/dj" element={hasAccess ? <Home /> : <Navigate to="/login" replace />} />
       <Route path="/account" element={isAuthenticated ? <AccountPage /> : <Navigate to="/dj" replace />} />

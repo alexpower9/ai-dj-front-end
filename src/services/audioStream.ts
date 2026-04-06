@@ -37,6 +37,11 @@ export interface AudioServiceCallbacks {
     onTransitionStart?: (transition: TransitionInfo) => void;
     onTransitionComplete?: (nowPlaying: string) => void;
     onBackendLog?: (lines: string[]) => void;
+    onRemotePairingCreated?: (pairing: {
+        pairingToken: string;
+        expiresAt: string;
+    }) => void;
+    onPlaybackStateChange?: (paused: boolean) => void;
 }
 
 // Audio queue item tagged with track ID
@@ -214,7 +219,7 @@ export class AudioStreamService {
         console.log("📨 Received JSON:", message);
 
         switch (message.type) {
-            case "track_start":
+            case "track_start": {
                 console.log("🎵 Track info received:", message.track.title);
                 this.sampleRate = message.track.sample_rate || 44100;
 
@@ -262,6 +267,7 @@ export class AudioStreamService {
                     );
                 }
                 break;
+            }
 
             case "track_end":
                 console.log("✅ Backend finished streaming track");
@@ -332,7 +338,7 @@ export class AudioStreamService {
                 }
                 break;
 
-            case "transition_start":
+            case "transition_start": {
                 console.log("🎛️ Transition starting:", message.transition);
                 this.isTransitioning = true;
                 const transitionInfo = this.parseTransitionInfo(
@@ -342,8 +348,9 @@ export class AudioStreamService {
                     this.callbacks.onTransitionStart(transitionInfo);
                 }
                 break;
+            }
 
-            case "transition_complete":
+            case "transition_complete": {
                 const delay = this.getBufferDelay();
                 setTimeout(() => {
                     console.log(
@@ -359,6 +366,7 @@ export class AudioStreamService {
                     }
                 }, delay * 1000);
                 break;
+            }
 
             case "error":
                 console.error("❌ Server error:", message.message);
@@ -373,17 +381,69 @@ export class AudioStreamService {
                 }
                 break;
 
+            case "remote_pairing_created":
+                if (this.callbacks.onRemotePairingCreated) {
+                    this.callbacks.onRemotePairingCreated({
+                        pairingToken: message.pairing_token,
+                        expiresAt: message.expires_at,
+                    });
+                }
+                break;
+
+            case "paused":
+                this.isPaused = true;
+                if (this.audioContext) {
+                    this.audioContext.suspend().catch((e) => {
+                        console.warn(
+                            "[AudioStreamService] remote pause sync failed",
+                            e,
+                        );
+                    });
+                }
+                if (this.callbacks.onPlaybackStateChange) {
+                    this.callbacks.onPlaybackStateChange(true);
+                }
+                break;
+
+            case "resumed":
+                this.isPaused = false;
+                if (this.audioContext) {
+                    this.audioContext.resume().catch((e) => {
+                        console.warn(
+                            "[AudioStreamService] remote resume sync failed",
+                            e,
+                        );
+                    });
+                }
+                if (this.callbacks.onPlaybackStateChange) {
+                    this.callbacks.onPlaybackStateChange(false);
+                }
+                break;
+
             // Non-actionable responses from the backend (no song queued, no playback change)
             case "greeting":
             case "help":
             case "unknown":
-            case "stopped":
             case "quick_transition_scheduled":
             case "force_skip_initiated":
                 console.log(
                     `ℹ️ Backend responded with ${message.type}:`,
                     message.message,
                 );
+                if (this.callbacks.onInfo) {
+                    this.callbacks.onInfo(message.type, message.message);
+                }
+                break;
+
+            case "stopped":
+                this.isPaused = false;
+                this.stopPlayback();
+                if (this.callbacks.onPlaybackStateChange) {
+                    this.callbacks.onPlaybackStateChange(false);
+                }
+                if (this.callbacks.onQueueEmpty) {
+                    this.callbacks.onQueueEmpty();
+                }
                 if (this.callbacks.onInfo) {
                     this.callbacks.onInfo(message.type, message.message);
                 }

@@ -18,6 +18,7 @@ import {
     MicVocal,
     Mic,
     MicOff,
+    QrCode,
     LogIn,
     UserCircle,
     Play,
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
 import { useAuth } from "../context/AuthContext";
+import RemotePairingModal from "../components/RemotePairingModal";
 
 type LibrarySong = {
     id?: string;
@@ -90,6 +92,10 @@ export default function Home() {
   //Upload Song State
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showGuestLoginMenu, setShowGuestLoginMenu] = useState(false);
+  const [showRemoteModal, setShowRemoteModal] = useState(false);
+  const [isRemotePairingLoading, setIsRemotePairingLoading] = useState(false);
+  const [remotePairingUrl, setRemotePairingUrl] = useState<string | null>(null);
+  const [remotePairingExpiresAt, setRemotePairingExpiresAt] = useState<string | null>(null);
 
   // Library sidebar collapse state
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
@@ -369,10 +375,23 @@ export default function Home() {
         console.error("Audio error:", message);
         addToast(message, "error");
         setLoading(false);
+        setIsRemotePairingLoading(false);
       },
       onInfo: (_type, _message) => {
         // Backend responded but no song was queued/played — clear the loading spinner
         setLoading(false);
+      },
+      onRemotePairingCreated: ({ pairingToken, expiresAt }) => {
+        const remoteUrl = new URL("/remote", window.location.origin);
+        remoteUrl.searchParams.set("pair", pairingToken);
+
+        setRemotePairingUrl(remoteUrl.toString());
+        setRemotePairingExpiresAt(expiresAt);
+        setIsRemotePairingLoading(false);
+        setShowRemoteModal(true);
+      },
+      onPlaybackStateChange: (paused) => {
+        setIsPaused(paused);
       },
       // Transition callbacks
       onTransitionPlanned: (transition) => {
@@ -796,6 +815,23 @@ export default function Home() {
         navigate("/login");
     }, [navigate]);
 
+    const handleOpenRemoteModal = useCallback(() => {
+        if (connectionStatus !== "connected") {
+            addToast("Connect to the DJ before creating a mobile remote link.", "error");
+            return;
+        }
+
+        setShowRemoteModal(true);
+        setIsRemotePairingLoading(true);
+        setRemotePairingUrl(null);
+        setRemotePairingExpiresAt(null);
+        audioService.sendMessage({ type: "create_remote_pairing" });
+    }, [addToast, audioService, connectionStatus]);
+
+    const handleCloseRemoteModal = useCallback(() => {
+        setShowRemoteModal(false);
+    }, []);
+
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Toast notifications */}
@@ -820,6 +856,14 @@ export default function Home() {
           ))}
         </div>
       )}
+
+      <RemotePairingModal
+        isOpen={showRemoteModal}
+        pairingUrl={remotePairingUrl}
+        expiresAt={remotePairingExpiresAt}
+        isLoading={isRemotePairingLoading}
+        onClose={handleCloseRemoteModal}
+      />
 
       {/* User account icon */}
       <div ref={guestMenuRef} className="absolute top-4 left-4 z-20">
@@ -858,14 +902,25 @@ export default function Home() {
         )}
       </div>
 
-      {/* Add Upload Button */}
-      <button
-        onClick={() => setShowUploadModal(true)}
-        className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
-      >
-        <Upload className="w-v h-4" />
-        Upload Song
-      </button>
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleOpenRemoteModal}
+          disabled={connectionStatus !== "connected"}
+          className="px-4 py-2 bg-white/10 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg border border-white/10"
+        >
+          <QrCode className="h-4 w-4" />
+          Remote Control
+        </button>
+
+        <button
+          onClick={() => setShowUploadModal(true)}
+          className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+        >
+          <Upload className="w-v h-4" />
+          Upload Song
+        </button>
+      </div>
       {/* ← ADD UPLOAD MODAL */}
       {showUploadModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
