@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { TransitionInfo as TransitionInfoType } from "../services/audioStream";
 
 type Props = {
@@ -81,7 +81,7 @@ function SlotValue({
   );
 }
 
-export default function TransitionInfo({
+function TransitionInfo({
   transition,
   isTransitioning,
   isQuickTransitionPending,
@@ -177,3 +177,4 @@ export default function TransitionInfo({
   );
 }
 
+export default memo(TransitionInfo);

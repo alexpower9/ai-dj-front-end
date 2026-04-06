@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import LibrarySidebar from "../components/LibrarySidebar";
 import PromptBox from "../components/PromptBox";
 import Waveform from "../components/Waveform";
 import PlaybackTimeline from "../components/PlaybackTimeline";
-import QueuePanel from "../components/QueuePanel";
+import RightPanel from "../components/RightPanel";
 import TrackInfo from "../components/TrackInfo";
 import TransitionInfo from "../components/TransitionInfo";
+import VolumeControl from "../components/VolumeControl";
 import {
     AudioStreamService,
     type TrackInfo as TrackInfoType,
@@ -16,14 +18,11 @@ import {
     MicVocal,
     Mic,
     MicOff,
-    ChevronLeft,
-    ChevronRight,
+    LogIn,
     UserCircle,
     Play,
     Pause,
     SkipForward,
-    Volume2,
-    VolumeX,
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
 import { useAuth } from "../context/AuthContext";
@@ -37,12 +36,16 @@ type LibrarySong = {
     scale?: string;
 };
 
+const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+
 export default function Home() {
     const navigate = useNavigate();
     const location = useLocation();
     const { isAuthenticated, token, user } = useAuth();
     const [audioService] = useState(() => new AudioStreamService());
     const [loading, setLoading] = useState(false);
+    const guestMenuRef = useRef<HTMLDivElement | null>(null);
     const setlistId = (location.state as { setlistId?: string } | null)
         ?.setlistId;
 
@@ -86,6 +89,7 @@ export default function Home() {
 
   //Upload Song State
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showGuestLoginMenu, setShowGuestLoginMenu] = useState(false);
 
   // Library sidebar collapse state
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
@@ -122,6 +126,39 @@ export default function Home() {
     voiceModeRef.current = voiceMode;
   }, [voiceMode]);
 
+  useEffect(() => {
+    if (isAuthenticated) {
+      setShowGuestLoginMenu(false);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!showGuestLoginMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        guestMenuRef.current &&
+        !guestMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowGuestLoginMenu(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGuestLoginMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showGuestLoginMenu]);
+
   const wakeBufferRef = useRef("");
   const captureFinalRef = useRef("");
   const captureInterimRef = useRef("");
@@ -156,7 +193,9 @@ export default function Home() {
   // Backend log state
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
   const [rightPanelTab, setRightPanelTab] = useState<"queue" | "logs">("queue");
-  const logEndRef = useRef<HTMLDivElement>(null);
+  const deferredBackendLogs = useDeferredValue(backendLogs);
+  const pendingLogLinesRef = useRef<string[]>([]);
+  const logFlushTimerRef = useRef<number | null>(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState<
@@ -172,9 +211,6 @@ export default function Home() {
   const [isEditingBass, setIsEditingBass] = useState(false);
   const [bassInput, setBassInput] = useState(String(bassLevel));
 
-  const clamp = (v: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, v));
-
   // Push bass UI value into WebAudio (client-side) whenever it changes
   useEffect(() => {
     try {
@@ -187,32 +223,31 @@ export default function Home() {
   // Map 0..100 => -135deg .. +135deg (classic knob sweep)
   const bassAngle = -135 + (bassLevel / 100) * 270;
 
-  const onKnobPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const onKnobPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    // Capture pointer so we keep receiving move events even if the cursor leaves the knob.
     try {
       (e.currentTarget as any).setPointerCapture?.(e.pointerId);
     } catch {
       // ignore
     }
     knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
-  };
+  }, [bassLevel]);
 
-  const onKnobPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const onKnobPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     if (!knobDragRef.current) return;
 
-    const deltaY = knobDragRef.current.startY - e.clientY; // up = increase
-    const next = knobDragRef.current.startValue + deltaY * 0.35; // sensitivity
+    const deltaY = knobDragRef.current.startY - e.clientY;
+    const next = knobDragRef.current.startValue + deltaY * 0.35;
     const clampedVal = clamp(Math.round(next), 0, 100);
 
     setBassLevel(clampedVal);
     setBassInput(String(clampedVal));
-  };
+  }, []);
 
-  const onKnobPointerUp = () => {
+  const onKnobPointerUp = useCallback(() => {
     knobDragRef.current = null;
-  };
+  }, []);
 
   const addToast = useCallback(
     (message: string, type: "error" | "info" | "success" = "info") => {
@@ -224,6 +259,28 @@ export default function Home() {
     },
     [],
   );
+
+  const flushBufferedLogs = useCallback(() => {
+    logFlushTimerRef.current = null;
+
+    if (pendingLogLinesRef.current.length === 0) return;
+
+    const nextLines = pendingLogLinesRef.current;
+    pendingLogLinesRef.current = [];
+
+    setBackendLogs((prev) => {
+      const updated = [...prev, ...nextLines];
+      return updated.length > 200 ? updated.slice(-200) : updated;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (logFlushTimerRef.current !== null) {
+        window.clearTimeout(logFlushTimerRef.current);
+      }
+    };
+  }, []);
 
   const trackKey = (t: TrackInfoType | null) =>
     t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
@@ -341,14 +398,10 @@ export default function Home() {
         // don't clear here; onTrackStart will clean it up
       },
       onBackendLog: (lines) => {
-        setBackendLogs((prev) => {
-          const updated = [...prev, ...lines];
-          return updated.length > 200 ? updated.slice(-200) : updated;
-        });
-        // Auto-scroll to bottom
-        requestAnimationFrame(() => {
-          logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-        });
+        pendingLogLinesRef.current.push(...lines);
+        if (logFlushTimerRef.current === null) {
+          logFlushTimerRef.current = window.setTimeout(flushBufferedLogs, 80);
+        }
       },
     });
 
@@ -380,7 +433,7 @@ export default function Home() {
     return () => {
       audioService.disconnect();
     };
-  }, [addToast, audioService, refreshLibrary, setlistId, token]);
+  }, [addToast, audioService, flushBufferedLogs, refreshLibrary, setlistId, token]);
 
     const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
@@ -683,6 +736,66 @@ export default function Home() {
         }
     }, []);
 
+    const collapseLibrary = useCallback(() => {
+        setIsLibraryCollapsed(true);
+    }, []);
+
+    const expandLibrary = useCallback(() => {
+        setIsLibraryCollapsed(false);
+    }, []);
+
+    const handleLibrarySongSelect = useCallback((title: string, artist: string) => {
+        const prettyPrompt = artist ? `play ${title} by ${artist}` : `play ${title}`;
+        handleSubmit(prettyPrompt);
+    }, [handleSubmit]);
+
+    const handleQueueReorder = useCallback((newOrder: number[]) => {
+        audioService.sendReorderQueue(newOrder);
+    }, [audioService]);
+
+    const handleQueueRemove = useCallback((index: number) => {
+        audioService.sendRemoveFromQueue(index);
+    }, [audioService]);
+
+    const handleRightPanelTabChange = useCallback((tab: "queue" | "logs") => {
+        setRightPanelTab(tab);
+    }, []);
+
+    const handleBassInputChange = useCallback((value: string) => {
+        setBassInput(value);
+    }, []);
+
+    const commitBassInput = useCallback(() => {
+        const val = clamp(Number(bassInput) || 0, 0, 100);
+        setBassLevel(val);
+        setBassInput(String(val));
+        setIsEditingBass(false);
+    }, [bassInput]);
+
+    const handleBassInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") {
+            commitBassInput();
+        }
+    }, [commitBassInput]);
+
+    const startBassEditing = useCallback(() => {
+        setIsEditingBass(true);
+    }, []);
+
+    const handleAccountButtonClick = useCallback(() => {
+        if (isAuthenticated) {
+            navigate("/account");
+            return;
+        }
+
+        setShowGuestLoginMenu((prev) => !prev);
+    }, [isAuthenticated, navigate]);
+
+    const handleGuestLoginClick = useCallback(() => {
+        setShowGuestLoginMenu(false);
+        navigate("/login");
+    }, [navigate]);
+
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
       {/* Toast notifications */}
@@ -709,21 +822,41 @@ export default function Home() {
       )}
 
       {/* User account icon */}
-      <button
-        onClick={() => isAuthenticated && navigate('/account')}
-        title={
-          isAuthenticated
-            ? `Signed in as ${user?.username}`
-            : "Guest — sign in to access your account"
-        }
-        className={`absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-          isAuthenticated
-            ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
-            : "bg-white/5 border border-white/10 opacity-50 cursor-default"
-        }`}
-      >
-        <UserCircle className="w-5 h-5 text-white/80" />
-      </button>
+      <div ref={guestMenuRef} className="absolute top-4 left-4 z-20">
+        <button
+          onClick={handleAccountButtonClick}
+          title={
+            isAuthenticated
+              ? `Signed in as ${user?.username}`
+              : "Guest mode - open sign in options"
+          }
+          aria-expanded={!isAuthenticated && showGuestLoginMenu}
+          aria-haspopup={!isAuthenticated ? "menu" : undefined}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+            isAuthenticated
+              ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+              : "bg-white/10 border border-white/15 hover:bg-white/15 hover:border-white/25 cursor-pointer"
+          }`}
+        >
+          <UserCircle className="w-5 h-5 text-white/80" />
+        </button>
+
+        {!isAuthenticated && showGuestLoginMenu && (
+          <div className="mt-3 w-44 rounded-2xl border border-white/10 bg-[#120922]/95 p-3 shadow-2xl backdrop-blur-xl">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">
+              Guest Mode
+            </p>
+            <button
+              type="button"
+              onClick={handleGuestLoginClick}
+              className="mt-3 w-full rounded-xl bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-500 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              Log In
+            </button>
+          </div>
+        )}
+      </div>
 
       {/* Add Upload Button */}
       <button
@@ -788,109 +921,17 @@ export default function Home() {
       >
         {/* Left sidebar: Library */}
         {isPlaying && (
-          <aside
-            className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
-              isLibraryCollapsed ? "w-10" : "w-[340px] xl:w-[360px]"
-            }`}
-          >
-            <div
-              className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? "p-0" : "p-4"}`}
-            >
-              {isLibraryCollapsed ? (
-                /* Collapsed: just the expand button */
-                <button
-                  type="button"
-                  onClick={() => setIsLibraryCollapsed(false)}
-                  className="w-full h-full flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                  title="Expand library"
-                >
-                  <ChevronRight className="w-6 h-6" />
-                </button>
-              ) : (
-                /* Expanded: full panel */
-                <>
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-xs font-semibold tracking-widest text-gray-300">
-                      LIBRARY
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={refreshLibrary}
-                        className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
-                      >
-                        {libraryLoading ? "Loading…" : "Refresh"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIsLibraryCollapsed(true)}
-                        className="text-gray-400 hover:text-gray-200 transition-colors"
-                        title="Collapse library"
-                      >
-                        <ChevronLeft className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {libraryError && (
-                    <div className="text-xs text-red-300 mb-2 truncate">
-                      {libraryError}
-                    </div>
-                  )}
-
-                  <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
-                    {librarySongs.length === 0 && !libraryLoading ? (
-                      <div className="text-sm text-gray-500">
-                        No songs found.
-                      </div>
-                    ) : (
-                      librarySongs.map((s: any, idx: number) => {
-                        const title =
-                          s?.title ??
-                          s?.name ??
-                          s?.song_name ??
-                          s?.id ??
-                          "Untitled";
-                        const artist = s?.artist ?? "";
-                        const bpm =
-                          typeof s?.bpm === "number" ? Math.round(s.bpm) : null;
-                        const key = s?.key ?? "";
-                        const scale = s?.scale ?? "";
-
-                        const prettyPrompt = artist
-                          ? `play ${title} by ${artist}`
-                          : `play ${title}`;
-
-                        const keyStr =
-                          `${key}${scale ? ` ${scale}` : ""}`.trim();
-
-                        return (
-                          <button
-                            key={s?.id ?? `${title}::${artist}::${idx}`}
-                            type="button"
-                            disabled={
-                              connectionStatus !== "connected" || loading
-                            }
-                            onClick={() => handleSubmit(prettyPrompt)}
-                            className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
-                          >
-                            <div className="text-sm text-white/90 font-medium truncate">
-                              {title}
-                            </div>
-                            <div className="text-xs text-gray-400 truncate">
-                              {artist}
-                              {bpm ? ` • ${bpm} BPM` : ""}
-                              {keyStr ? ` • ${keyStr}` : ""}
-                            </div>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          </aside>
+          <LibrarySidebar
+            isCollapsed={isLibraryCollapsed}
+            librarySongs={librarySongs}
+            libraryLoading={libraryLoading}
+            libraryError={libraryError}
+            disabled={connectionStatus !== "connected" || loading}
+            onRefresh={refreshLibrary}
+            onCollapse={collapseLibrary}
+            onExpand={expandLibrary}
+            onSelectSong={handleLibrarySongSelect}
+          />
         )}
         {/* Left column */}
         <div
@@ -1115,37 +1156,13 @@ export default function Home() {
                   </button>
 
                   {/* Volume slider */}
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const newVol = volume > 0 ? 0 : 1;
-                        setVolume(newVol);
-                        audioService.setVolume(newVol);
-                      }}
-                      className="text-white/60 hover:text-white transition-colors shrink-0 cursor-pointer"
-                      title={volume === 0 ? "Unmute" : "Mute"}
-                    >
-                      {volume === 0 ? (
-                        <VolumeX className="w-4 h-4" />
-                      ) : (
-                        <Volume2 className="w-4 h-4" />
-                      )}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={volume}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        setVolume(v);
-                        audioService.setVolume(v);
-                      }}
-                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-primary-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-400"
-                    />
-                  </div>
+                  <VolumeControl
+                    volume={volume}
+                    onVolumeChange={(v) => {
+                      setVolume(v);
+                      audioService.setVolume(v);
+                    }}
+                  />
                 </div>
               </div>
             )}
@@ -1162,154 +1179,27 @@ export default function Home() {
 
         {/* Right column: full queue */}
         {isPlaying && (
-          <aside className="w-full lg:w-[360px] flex-shrink-0 flex flex-col">
-            <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4 flex flex-col">
-              {/* Tab toggle */}
-              <div className="flex mb-3 bg-black/20 rounded-lg p-0.5 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setRightPanelTab("queue")}
-                  className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === "queue"
-                      ? "bg-white/10 text-white"
-                      : "text-white/40 hover:text-white/60"
-                  }`}
-                >
-                  Queue
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightPanelTab("logs")}
-                  className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                    rightPanelTab === "logs"
-                      ? "bg-white/10 text-white"
-                      : "text-white/40 hover:text-white/60"
-                  }`}
-                >
-                  Logs
-                </button>
-              </div>
-
-              {/* Queue view */}
-              {rightPanelTab === "queue" && (
-                <div className="flex-1 min-h-0 flex flex-col relative">
-                  <div className="flex-1 min-h-0">
-                    <QueuePanel
-                      currentTrack={currentTrack}
-                      previousTrack={previousTrack}
-                      upNext={upNext}
-                      onReorder={(newOrder) =>
-                        audioService.sendReorderQueue(newOrder)
-                      }
-                      onRemove={(index) =>
-                        audioService.sendRemoveFromQueue(index)
-                      }
-                    />
-                  </div>
-
-                  {/* EQ/Bass concept UI anchored bottom-right */}
-                  <div className="absolute bottom-4 right-4">
-                    <div className="flex items-center gap-3 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 backdrop-blur-xl shadow-lg">
-                      <div className="flex flex-col items-center">
-                        <div className="text-[10px] tracking-widest text-white/60 mb-1">
-                          BASS
-                        </div>
-
-                        <button
-                          type="button"
-                          onPointerDown={onKnobPointerDown}
-                          onPointerMove={onKnobPointerMove}
-                          onPointerUp={onKnobPointerUp}
-                          onPointerCancel={onKnobPointerUp}
-                          className="relative w-14 h-14 rounded-full bg-black/30 border border-white/10 shadow-lg cursor-ns-resize touch-none select-none"
-                          style={{ touchAction: "none" }}
-                          aria-label="Bass control (demo)"
-                          title="Drag up/down"
-                        >
-                          <span
-                            className="absolute left-1/2 top-1/2 w-1 h-6 bg-gradient-to-b from-neon-cyan/80 to-primary-500/80 rounded-full"
-                            style={{
-                              transform: `translate(-50%, -95%) rotate(${bassAngle}deg)`,
-                              transformOrigin: "50% 95%",
-                            }}
-                          />
-                          <span className="absolute left-1/2 top-1/2 w-5 h-5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/10 border border-white/10" />
-                        </button>
-
-                        <div className="mt-1 text-[10px] text-white/50 tabular-nums">
-                          {isEditingBass ? (
-                            <input
-                              type="number"
-                              value={bassInput}
-                              autoFocus
-                              min={0}
-                              max={100}
-                              onChange={(e) => setBassInput(e.target.value)}
-                              onBlur={() => {
-                                const val = clamp(Number(bassInput) || 0, 0, 100);
-                                setBassLevel(val);
-                                setBassInput(String(val));
-                                setIsEditingBass(false);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") {
-                                  const val = clamp(Number(bassInput) || 0, 0, 100);
-                                  setBassLevel(val);
-                                  setBassInput(String(val));
-                                  setIsEditingBass(false);
-                                }
-                              }}
-                              className="w-10 bg-black/40 border border-white/10 rounded text-center text-white outline-none"
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setIsEditingBass(true)}
-                              className="hover:text-white transition"
-                            >
-                              {bassLevel}%
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Logs view */}
-              {rightPanelTab === "logs" && (
-                <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex-1 overflow-y-auto library-scroll rounded-lg bg-black/30 border border-white/5 p-3 font-mono text-[11px] leading-relaxed text-white/60">
-                    {backendLogs.length === 0 ? (
-                      <p className="text-white/20 italic">No logs yet...</p>
-                    ) : (
-                      backendLogs.map((line, i) => (
-                        <div
-                          key={i}
-                          className={`py-0.5 ${
-                            line.includes("ERROR") || line.includes("Error")
-                              ? "text-red-400"
-                              : line.includes("[WS]")
-                                ? "text-neon-cyan/70"
-                                : line.includes("[QUEUE]")
-                                  ? "text-neon-green/70"
-                                  : line.includes("[TRANSITION]") ||
-                                      line.includes("[DEBUG]")
-                                    ? "text-neon-purple/70"
-                                    : ""
-                          }`}
-                        >
-                          {line}
-                        </div>
-                      ))
-                    )}
-                    <div ref={logEndRef} />
-                  </div>
-                </div>
-              )}
-            </div>
-          </aside>
+          <RightPanel
+            rightPanelTab={rightPanelTab}
+            onTabChange={handleRightPanelTabChange}
+            currentTrack={currentTrack}
+            previousTrack={previousTrack}
+            upNext={upNext}
+            onReorder={handleQueueReorder}
+            onRemove={handleQueueRemove}
+            backendLogs={deferredBackendLogs}
+            bassLevel={bassLevel}
+            bassAngle={bassAngle}
+            isEditingBass={isEditingBass}
+            bassInput={bassInput}
+            onBassInputChange={handleBassInputChange}
+            onBassInputCommit={commitBassInput}
+            onBassInputKeyDown={handleBassInputKeyDown}
+            onBassEditStart={startBassEditing}
+            onKnobPointerDown={onKnobPointerDown}
+            onKnobPointerMove={onKnobPointerMove}
+            onKnobPointerUp={onKnobPointerUp}
+          />
         )}
       </div>
     </div>

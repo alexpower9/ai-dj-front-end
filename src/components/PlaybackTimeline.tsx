@@ -1,11 +1,13 @@
 
+import { memo } from 'react';
+
 type Props = {
   currentTime: number;        // seconds
   duration: number;           // seconds
   transitionPoints: number[]; // seconds where a transition could happen
 };
 
-export default function PlaybackTimeline({
+function PlaybackTimeline({
   currentTime,
   duration,
   transitionPoints,
@@ -67,3 +69,5 @@ function formatTime(seconds: number): string {
   const rStr = r < 10 ? `0${r}` : `${r}`;
   return `${m}:${rStr}`;
 }
+
+export default memo(PlaybackTimeline);

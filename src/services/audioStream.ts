@@ -101,6 +101,7 @@ export class AudioStreamService {
     private playbackCheckInterval: number | null = null;
 
     private readonly PRE_BUFFER_CHUNKS = 4;
+    private readonly MAX_SCHEDULE_AHEAD_SECONDS = 3;
     private buffering = true;
 
     setCallbacks(callbacks: AudioServiceCallbacks) {
@@ -710,6 +711,14 @@ export class AudioStreamService {
         if (!this.audioContext || !this.isPlaying) return;
 
         while (this.audioQueue.length > 0) {
+            const bufferedAhead = Math.max(
+                0,
+                this.nextStartTime - this.audioContext.currentTime,
+            );
+            if (bufferedAhead >= this.MAX_SCHEDULE_AHEAD_SECONDS) {
+                break;
+            }
+
             const audioItem = this.audioQueue.shift()!;
             const audioBuffer = audioItem.buffer;
             const bufferTrackId = audioItem.trackId;
@@ -719,7 +728,7 @@ export class AudioStreamService {
                 this.audioContext.currentTime,
             );
 
-            if (bufferTrackId != this.currentPlayingTrackId) {
+            if (bufferTrackId !== this.currentPlayingTrackId) {
                 const trackInfo = this.trackInfoMap.get(bufferTrackId);
                 if (trackInfo) {
                     const existingTransition = this.pendingTransitions.find(
