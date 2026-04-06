@@ -289,9 +289,7 @@ export default function RemoteControl() {
 
             <button
               type="button"
-              onClick={() =>
-                void submitCommand({ type: "prompt", data: "skip to next song" })
-              }
+              onClick={() => void submitCommand({ type: "quick_transition" })}
               disabled={!sessionState?.host_connected || submitting || !isPlaying}
               className="flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-white/10 text-white transition-colors hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50"
             >

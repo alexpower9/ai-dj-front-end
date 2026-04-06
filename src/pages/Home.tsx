@@ -489,6 +489,22 @@ export default function Home() {
         [connectionStatus, audioService],
     );
 
+    const handleQuickTransition = useCallback(() => {
+        if (connectionStatus !== "connected") {
+            console.error("Cannot send quick transition - not connected");
+            return;
+        }
+
+        try {
+            audioService.sendQuickTransition();
+        } catch (error) {
+            console.error("Error sending quick transition:", error);
+            setLoading(false);
+            if (loadingTimeoutRef.current)
+                clearTimeout(loadingTimeoutRef.current);
+        }
+    }, [connectionStatus, audioService]);
+
     // Set up speech recognition once (stable instance)
     // Wake mode: always listens for "hey tempo"
     // Capture mode: after wake word, captures a prompt and auto-sends after brief silence
@@ -1203,7 +1219,7 @@ export default function Home() {
                   <button
                     type="button"
                     disabled={connectionStatus !== "connected" || !isPlaying}
-                    onClick={() => handleSubmit("skip to next song")}
+                    onClick={handleQuickTransition}
                     className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
                     title="Skip to next song"
                   >

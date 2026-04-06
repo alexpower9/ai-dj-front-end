@@ -57,6 +57,14 @@ interface PendingTransition {
     trackInfo: TrackInfo;
 }
 
+interface ScheduledSource {
+    id: number;
+    source: AudioBufferSourceNode;
+    trackId: number;
+    startTime: number;
+    endTime: number;
+}
+
 export class AudioStreamService {
     private ws: WebSocket | null = null;
     private isConnected: boolean = false;
@@ -78,6 +86,8 @@ export class AudioStreamService {
     private isPaused = false;
     private currentSource: AudioBufferSourceNode | null = null;
     private nextStartTime: number = 0;
+    private scheduledSources: ScheduledSource[] = [];
+    private nextScheduledSourceId: number = 1;
 
     // Audio queue with track ID tags
     private audioQueue: QueuedAudio[] = [];
@@ -105,9 +115,16 @@ export class AudioStreamService {
     private allTracksStreamingComplete: boolean = false;
     private playbackCheckInterval: number | null = null;
 
-    private readonly PRE_BUFFER_CHUNKS = 4;
-    private readonly MAX_SCHEDULE_AHEAD_SECONDS = 3;
+    private readonly INITIAL_PRE_BUFFER_CHUNKS = 4;
+    private readonly RECOVERY_PRE_BUFFER_CHUNKS = 2;
+    private readonly TRANSITION_RECOVERY_PRE_BUFFER_CHUNKS = 1;
+    private readonly MAX_SCHEDULE_AHEAD_SECONDS = 1.25;
+    private readonly IMMEDIATE_TRANSITION_GUARD_SECONDS = 0.28;
+    private readonly TRANSITION_CUTOVER_GUARD_SECONDS = 0.12;
+    private requiredBufferedChunks = this.INITIAL_PRE_BUFFER_CHUNKS;
     private buffering = true;
+    private hasTrimmedScheduledPlaybackForTransition = false;
+    private incomingMessageQueue: Promise<void> = Promise.resolve();
 
     setCallbacks(callbacks: AudioServiceCallbacks) {
         this.callbacks = callbacks;
@@ -139,15 +156,8 @@ export class AudioStreamService {
                 resolve();
             };
 
-            this.ws.onmessage = async (event) => {
-                if (typeof event.data === "string") {
-                    // Handle JSON messages
-                    const message = JSON.parse(event.data);
-                    this.handleJsonMessage(message);
-                } else if (event.data instanceof Blob) {
-                    // Handle binary audio data
-                    await this.handleAudioData(event.data);
-                }
+            this.ws.onmessage = (event) => {
+                this.enqueueIncomingMessage(event.data);
             };
 
             this.ws.onerror = (error) => {
@@ -215,6 +225,119 @@ export class AudioStreamService {
         return Math.max(0, this.nextStartTime - this.audioContext.currentTime);
     }
 
+    private enqueueIncomingMessage(data: string | Blob) {
+        const task = async () => {
+            if (typeof data === "string") {
+                const message = JSON.parse(data);
+                this.handleJsonMessage(message);
+            } else if (data instanceof Blob) {
+                await this.handleAudioData(data);
+            }
+        };
+
+        this.incomingMessageQueue = this.incomingMessageQueue
+            .then(task)
+            .catch((error) => {
+                console.error("Error processing queued audio message:", error);
+            });
+    }
+
+    private removeScheduledSource(sourceId: number) {
+        const existing = this.scheduledSources.find(
+            (entry) => entry.id === sourceId,
+        );
+        if (!existing) return;
+
+        this.scheduledSources = this.scheduledSources.filter(
+            (entry) => entry.id !== sourceId,
+        );
+
+        if (this.currentSource === existing.source) {
+            this.currentSource = null;
+        }
+
+        this.recomputeNextStartTime();
+    }
+
+    private recomputeNextStartTime(minimumStartTime?: number) {
+        if (!this.audioContext) return;
+
+        const baseTime = minimumStartTime ?? this.audioContext.currentTime;
+        const maxScheduledEnd = this.scheduledSources.reduce(
+            (max, entry) => Math.max(max, entry.endTime),
+            baseTime,
+        );
+
+        this.nextStartTime = Math.max(baseTime, maxScheduledEnd);
+    }
+
+    private clearQueuedAudioForTrack(trackId: number): number {
+        const before = this.audioQueue.length;
+        this.audioQueue = this.audioQueue.filter((item) => item.trackId !== trackId);
+        return before - this.audioQueue.length;
+    }
+
+    private trimScheduledPlaybackForTransition(
+        guardSeconds: number,
+        reason: string,
+    ) {
+        if (
+            !this.audioContext ||
+            !this.isPlaying ||
+            this.hasTrimmedScheduledPlaybackForTransition
+        ) {
+            return;
+        }
+
+        const trackId = this.currentPlayingTrackId;
+        if (!trackId) return;
+
+        const cutoverTime = this.audioContext.currentTime + guardSeconds;
+        let trimmedScheduledSources = 0;
+
+        this.scheduledSources = this.scheduledSources.flatMap((entry) => {
+            if (entry.trackId !== trackId || entry.endTime <= cutoverTime) {
+                return [entry];
+            }
+
+            trimmedScheduledSources++;
+
+            try {
+                entry.source.stop(cutoverTime);
+            } catch (error) {
+                console.warn(
+                    "[AudioStreamService] failed to trim scheduled source",
+                    error,
+                );
+            }
+
+            if (entry.startTime >= cutoverTime - 0.001) {
+                if (this.currentSource === entry.source) {
+                    this.currentSource = null;
+                }
+                return [];
+            }
+
+            return [{ ...entry, endTime: cutoverTime }];
+        });
+
+        const droppedQueuedChunks = this.clearQueuedAudioForTrack(trackId);
+        this.hasTrimmedScheduledPlaybackForTransition = true;
+        this.buffering = true;
+        this.requiredBufferedChunks = this.TRANSITION_RECOVERY_PRE_BUFFER_CHUNKS;
+        this.recomputeNextStartTime(cutoverTime);
+
+        console.log(
+            `[AudioStreamService] Trimmed scheduled playback for ${reason}: ${trimmedScheduledSources} scheduled, ${droppedQueuedChunks} queued`,
+        );
+
+        if (this.audioQueue.length >= this.requiredBufferedChunks) {
+            this.buffering = false;
+            this.requiredBufferedChunks = this.INITIAL_PRE_BUFFER_CHUNKS;
+            this.scheduleNextBuffer();
+        }
+    }
+
     private handleJsonMessage(message: any) {
         console.log("📨 Received JSON:", message);
 
@@ -222,6 +345,7 @@ export class AudioStreamService {
             case "track_start": {
                 console.log("🎵 Track info received:", message.track.title);
                 this.sampleRate = message.track.sample_rate || 44100;
+                this.hasTrimmedScheduledPlaybackForTransition = false;
 
                 // Increment track ID for this new track
                 this.currentStreamingTrackId++;
@@ -344,6 +468,10 @@ export class AudioStreamService {
                 const transitionInfo = this.parseTransitionInfo(
                     message.transition,
                 );
+                this.trimScheduledPlaybackForTransition(
+                    this.TRANSITION_CUTOVER_GUARD_SECONDS,
+                    "transition start",
+                );
                 if (this.callbacks.onTransitionStart && transitionInfo) {
                     this.callbacks.onTransitionStart(transitionInfo);
                 }
@@ -425,10 +553,23 @@ export class AudioStreamService {
             case "help":
             case "unknown":
             case "quick_transition_scheduled":
+                console.log(
+                    `ℹ️ Backend responded with ${message.type}:`,
+                    message.message,
+                );
+                if (this.callbacks.onInfo) {
+                    this.callbacks.onInfo(message.type, message.message);
+                }
+                break;
+
             case "force_skip_initiated":
                 console.log(
                     `ℹ️ Backend responded with ${message.type}:`,
                     message.message,
+                );
+                this.trimScheduledPlaybackForTransition(
+                    this.IMMEDIATE_TRANSITION_GUARD_SECONDS,
+                    "immediate skip",
                 );
                 if (this.callbacks.onInfo) {
                     this.callbacks.onInfo(message.type, message.message);
@@ -524,6 +665,7 @@ export class AudioStreamService {
 
         this.currentTrack = transition.trackInfo;
         this.currentPlayingTrackId = transition.trackId;
+        this.hasTrimmedScheduledPlaybackForTransition = false;
 
         // Clear transition info after transition completes
         this.pendingTransitionInfo = null;
@@ -644,16 +786,18 @@ export class AudioStreamService {
             if (bufferAhead < 0.2 && !this.buffering) {
                 console.warn("Buffer nearly emply, re-buffering...");
                 this.buffering = true;
-                if (this.audioContext) {
-                    this.nextStartTime = this.audioContext.currentTime + 0.5;
-                }
+                this.requiredBufferedChunks =
+                    this.hasTrimmedScheduledPlaybackForTransition
+                        ? this.TRANSITION_RECOVERY_PRE_BUFFER_CHUNKS
+                        : this.RECOVERY_PRE_BUFFER_CHUNKS;
             }
 
             if (
                 this.buffering &&
-                this.audioQueue.length >= this.PRE_BUFFER_CHUNKS
+                this.audioQueue.length >= this.requiredBufferedChunks
             ) {
                 this.buffering = false;
+                this.requiredBufferedChunks = this.INITIAL_PRE_BUFFER_CHUNKS;
                 this.scheduleNextBuffer();
             } else if (!this.buffering) {
                 this.scheduleNextBuffer();
@@ -695,6 +839,8 @@ export class AudioStreamService {
         if (!this.isPlaying && this.audioContext) {
             this.isPlaying = true;
             this.buffering = true;
+            this.requiredBufferedChunks = this.INITIAL_PRE_BUFFER_CHUNKS;
+            this.hasTrimmedScheduledPlaybackForTransition = false;
             this.nextStartTime = this.audioContext.currentTime;
             console.log("▶️ Playback started");
         }
@@ -818,8 +964,22 @@ export class AudioStreamService {
                 source.connect(this.audioContext.destination);
             }
 
+            const sourceId = this.nextScheduledSourceId++;
+            const scheduledSource: ScheduledSource = {
+                id: sourceId,
+                source,
+                trackId: bufferTrackId,
+                startTime,
+                endTime: startTime + audioBuffer.duration,
+            };
+
+            source.onended = () => {
+                this.removeScheduledSource(sourceId);
+            };
+
+            this.scheduledSources.push(scheduledSource);
             source.start(startTime);
-            this.nextStartTime = startTime + audioBuffer.duration;
+            this.nextStartTime = scheduledSource.endTime;
             this.currentSource = source;
         }
     }
@@ -835,6 +995,8 @@ export class AudioStreamService {
         this.allTracksStreamingComplete = false;
         this.currentStreamingTrackId = 0;
         this.currentPlayingTrackId = 0;
+        this.hasTrimmedScheduledPlaybackForTransition = false;
+        this.requiredBufferedChunks = this.INITIAL_PRE_BUFFER_CHUNKS;
 
         if (this.playbackCheckInterval !== null) {
             clearInterval(this.playbackCheckInterval);
@@ -845,14 +1007,16 @@ export class AudioStreamService {
             this.transitionCheckInterval = null;
         }
 
-        if (this.currentSource) {
+        for (const entry of this.scheduledSources) {
             try {
-                this.currentSource.stop();
+                entry.source.stop();
             } catch (e) {
                 // Source might already be stopped
             }
-            this.currentSource = null;
         }
+        this.scheduledSources = [];
+        this.currentSource = null;
+        this.nextStartTime = this.audioContext?.currentTime ?? 0;
 
         console.log("⏹ Playback stopped");
     }
@@ -863,6 +1027,16 @@ export class AudioStreamService {
             console.log(" Sent prompt:", prompt);
         } else {
             console.error(" Cannot send - WebSocket is not connected");
+            throw new Error("WebSocket is not connected");
+        }
+    }
+
+    sendQuickTransition() {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({ type: "quick_transition" }));
+            console.log(" Sent quick transition command");
+        } else {
+            console.error(" Cannot send quick transition - WebSocket is not connected");
             throw new Error("WebSocket is not connected");
         }
     }
