@@ -1,4 +1,10 @@
-import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useDeferredValue,
+  useRef,
+} from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import LibrarySidebar from "../components/LibrarySidebar";
 import PromptBox from "../components/PromptBox";
@@ -9,22 +15,22 @@ import TrackInfo from "../components/TrackInfo";
 import TransitionInfo from "../components/TransitionInfo";
 import VolumeControl from "../components/VolumeControl";
 import {
-    AudioStreamService,
-    type TrackInfo as TrackInfoType,
-    type TransitionInfo as TransitionInfoType,
+  AudioStreamService,
+  type TrackInfo as TrackInfoType,
+  type TransitionInfo as TransitionInfoType,
 } from "../services/audioStream";
 import {
-    Upload,
-    MicVocal,
-    Mic,
-    MicOff,
-    QrCode,
-    LogIn,
-    ShieldCheck,
-    UserCircle,
-    Play,
-    Pause,
-    SkipForward,
+  Upload,
+  MicVocal,
+  Mic,
+  MicOff,
+  QrCode,
+  LogIn,
+  ShieldCheck,
+  UserCircle,
+  Play,
+  Pause,
+  SkipForward,
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
 import DJHelpButton from "../components/DJHelpButton.tsx";
@@ -32,60 +38,60 @@ import { useAuth } from "../context/AuthContext";
 import RemotePairingModal from "../components/RemotePairingModal";
 
 type LibrarySong = {
-    id?: string;
-    title?: string;
-    artist?: string;
-    bpm?: number;
-    key?: string;
-    scale?: string;
+  id?: string;
+  title?: string;
+  artist?: string;
+  bpm?: number;
+  key?: string;
+  scale?: string;
 };
 
 const clamp = (value: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, value));
+  Math.max(min, Math.min(max, value));
 
 export default function Home() {
-    const navigate = useNavigate();
-    const location = useLocation();
-    const { isAuthenticated, token, user, isDev } = useAuth();
-    const [audioService] = useState(() => new AudioStreamService());
-    const [loading, setLoading] = useState(false);
-    const guestMenuRef = useRef<HTMLDivElement | null>(null);
-    const setlistId = (location.state as { setlistId?: string } | null)
-        ?.setlistId;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { isAuthenticated, token, user, isDev } = useAuth();
+  const [audioService] = useState(() => new AudioStreamService());
+  const [loading, setLoading] = useState(false);
+  const guestMenuRef = useRef<HTMLDivElement | null>(null);
+  const setlistId = (location.state as { setlistId?: string } | null)
+    ?.setlistId;
 
-    // Library state (songs available on the backend)
-    const [librarySongs, setLibrarySongs] = useState<LibrarySong[]>([]);
-    const [libraryLoading, setLibraryLoading] = useState(false);
-    const [libraryError, setLibraryError] = useState<string | null>(null);
+  // Library state (songs available on the backend)
+  const [librarySongs, setLibrarySongs] = useState<LibrarySong[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
 
-    const refreshLibrary = useCallback(async () => {
-        setLibraryLoading(true);
-        setLibraryError(null);
-        try {
-            const url = token
-                ? `/api/library?token=${encodeURIComponent(token)}`
-                : "/api/library";
-            const res = await fetch(url);
-            if (!res.ok) {
-                throw new Error(`Library fetch failed: ${res.status}`);
-            }
+  const refreshLibrary = useCallback(async () => {
+    setLibraryLoading(true);
+    setLibraryError(null);
+    try {
+      const url = token
+        ? `/api/library?token=${encodeURIComponent(token)}`
+        : "/api/library";
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Library fetch failed: ${res.status}`);
+      }
 
-            const data: any = await res.json();
-            const songs = Array.isArray(data)
-                ? data
-                : Array.isArray(data?.songs)
-                  ? data.songs
-                  : Array.isArray(data?.library)
-                    ? data.library
-                    : [];
-            setLibrarySongs(songs);
-        } catch (e: any) {
-            console.error("Failed to load library:", e);
-            setLibraryError(e?.message ?? "Failed to load library");
-        } finally {
-            setLibraryLoading(false);
-        }
-    }, [token]);
+      const data: any = await res.json();
+      const songs = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.songs)
+          ? data.songs
+          : Array.isArray(data?.library)
+            ? data.library
+            : [];
+      setLibrarySongs(songs);
+    } catch (e: any) {
+      console.error("Failed to load library:", e);
+      setLibraryError(e?.message ?? "Failed to load library");
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, [token]);
 
   const [connectionStatus, setConnectionStatus] = useState<
     "connecting" | "connected" | "disconnected"
@@ -94,10 +100,13 @@ export default function Home() {
   //Upload Song State
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showGuestLoginMenu, setShowGuestLoginMenu] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [showRemoteModal, setShowRemoteModal] = useState(false);
   const [isRemotePairingLoading, setIsRemotePairingLoading] = useState(false);
   const [remotePairingUrl, setRemotePairingUrl] = useState<string | null>(null);
-  const [remotePairingExpiresAt, setRemotePairingExpiresAt] = useState<string | null>(null);
+  const [remotePairingExpiresAt, setRemotePairingExpiresAt] = useState<
+    string | null
+  >(null);
 
   // Library sidebar collapse state
   const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
@@ -137,6 +146,7 @@ export default function Home() {
   useEffect(() => {
     if (isAuthenticated) {
       setShowGuestLoginMenu(false);
+      setIsHelpOpen(false);
     }
   }, [isAuthenticated]);
 
@@ -231,27 +241,33 @@ export default function Home() {
   // Map 0..100 => -135deg .. +135deg (classic knob sweep)
   const bassAngle = -135 + (bassLevel / 100) * 270;
 
-  const onKnobPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    try {
-      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-    } catch {
-      // ignore
-    }
-    knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
-  }, [bassLevel]);
+  const onKnobPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      try {
+        (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+      } catch {
+        // ignore
+      }
+      knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
+    },
+    [bassLevel],
+  );
 
-  const onKnobPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    e.preventDefault();
-    if (!knobDragRef.current) return;
+  const onKnobPointerMove = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      e.preventDefault();
+      if (!knobDragRef.current) return;
 
-    const deltaY = knobDragRef.current.startY - e.clientY;
-    const next = knobDragRef.current.startValue + deltaY * 0.35;
-    const clampedVal = clamp(Math.round(next), 0, 100);
+      const deltaY = knobDragRef.current.startY - e.clientY;
+      const next = knobDragRef.current.startValue + deltaY * 0.35;
+      const clampedVal = clamp(Math.round(next), 0, 100);
 
-    setBassLevel(clampedVal);
-    setBassInput(String(clampedVal));
-  }, []);
+      setBassLevel(clampedVal);
+      setBassInput(String(clampedVal));
+    },
+    [],
+  );
 
   const onKnobPointerUp = useCallback(() => {
     knobDragRef.current = null;
@@ -454,401 +470,428 @@ export default function Home() {
     return () => {
       audioService.disconnect();
     };
-  }, [addToast, audioService, flushBufferedLogs, refreshLibrary, setlistId, token]);
+  }, [
+    addToast,
+    audioService,
+    flushBufferedLogs,
+    refreshLibrary,
+    setlistId,
+    token,
+  ]);
 
-    const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-        null,
-    );
+  const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const handleSubmit = useCallback(
-        async (prompt: string) => {
-            if (connectionStatus !== "connected") {
-                console.error("Cannot send prompt - not connected");
-                return;
+  const handleSubmit = useCallback(
+    async (prompt: string) => {
+      if (connectionStatus !== "connected") {
+        console.error("Cannot send prompt - not connected");
+        return;
+      }
+
+      //setLoading(true);
+
+      // Safety timeout: clear loading after 30s if no response clears it first
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = setTimeout(() => {
+        console.warn("Loading timeout reached — clearing loading state");
+        setLoading(false);
+      }, 30_000);
+
+      try {
+        audioService.sendPrompt(prompt);
+      } catch (error) {
+        console.error("Error sending prompt:", error);
+        setLoading(false);
+        if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+      }
+    },
+    [connectionStatus, audioService],
+  );
+
+  const handleQuickTransition = useCallback(() => {
+    if (connectionStatus !== "connected") {
+      console.error("Cannot send quick transition - not connected");
+      return;
+    }
+
+    try {
+      audioService.sendQuickTransition();
+    } catch (error) {
+      console.error("Error sending quick transition:", error);
+      setLoading(false);
+      if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+    }
+  }, [connectionStatus, audioService]);
+
+  // Set up speech recognition once (stable instance)
+  // Wake mode: always listens for "hey tempo"
+  // Capture mode: after wake word, captures a prompt and auto-sends after brief silence
+  useEffect(() => {
+    const SpeechRecognition: undefined | (new () => any) =
+      (window as any).SpeechRecognition ||
+      (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) return;
+
+    const rec = new SpeechRecognition();
+    rec.lang = "en-US";
+    rec.interimResults = true;
+    rec.continuous = true;
+    rec.maxAlternatives = 1;
+
+    const clearSilenceTimer = () => {
+      if (silenceTimerRef.current) {
+        window.clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+    };
+
+    const stripWakeWord = (text: string) => {
+      // Remove wake word from any transcript before sending/previewing
+      const cleaned = (text || "")
+        .replace(/\bhey\s+tempo\b/gi, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return cleaned;
+    };
+
+    const resetToWakeMode = () => {
+      setVoiceMode("wake");
+      voiceModeRef.current = "wake";
+      setIsListening(false);
+      setVoicePreview("");
+      wakeBufferRef.current = "";
+      captureFinalRef.current = "";
+      captureInterimRef.current = "";
+      finalTranscriptRef.current = "";
+      clearSilenceTimer();
+    };
+
+    rec.onstart = () => {
+      recognitionRunningRef.current = true;
+    };
+
+    rec.onresult = (event: any) => {
+      const mode = voiceModeRef.current;
+      // Process only new results to avoid re-building the entire transcript every time.
+      let interimChunk = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const txt = (event.results[i]?.[0]?.transcript ?? "").trim();
+        if (!txt) continue;
+
+        if (event.results[i].isFinal) {
+          if (mode === "capture") {
+            const cleaned = stripWakeWord(txt);
+            if (cleaned) {
+              captureFinalRef.current = (
+                captureFinalRef.current +
+                " " +
+                cleaned
+              ).trim();
             }
+          } else {
+            wakeBufferRef.current = (wakeBufferRef.current + " " + txt).trim();
+          }
+        } else {
+          // Keep interim for live preview, but never include the wake word
+          const interimCleaned = mode === "capture" ? stripWakeWord(txt) : txt;
+          interimChunk = (interimChunk + " " + interimCleaned).trim();
+        }
+      }
 
-            //setLoading(true);
+      // --- WAKE MODE ---
+      if (mode === "wake") {
+        const combined = (wakeBufferRef.current + " " + interimChunk)
+          .trim()
+          .toLowerCase();
 
-            // Safety timeout: clear loading after 30s if no response clears it first
-            if (loadingTimeoutRef.current)
-                clearTimeout(loadingTimeoutRef.current);
-            loadingTimeoutRef.current = setTimeout(() => {
-                console.warn(
-                    "Loading timeout reached — clearing loading state",
-                );
-                setLoading(false);
-            }, 30_000);
+        if (combined.includes(WAKE_WORD)) {
+          // Switch to capture mode and start buffering the prompt
+          voiceModeRef.current = "capture";
+          setVoiceMode("capture");
+          setIsListening(true);
 
-            try {
-                audioService.sendPrompt(prompt);
-            } catch (error) {
-                console.error("Error sending prompt:", error);
-                setLoading(false);
-                if (loadingTimeoutRef.current)
-                    clearTimeout(loadingTimeoutRef.current);
-            }
-        },
-        [connectionStatus, audioService],
-    );
+          // If the wake phrase and prompt were spoken together, keep only the prompt part
+          const afterWake = stripWakeWord(
+            (wakeBufferRef.current + " " + interimChunk).trim(),
+          );
 
-    const handleQuickTransition = useCallback(() => {
-        if (connectionStatus !== "connected") {
-            console.error("Cannot send quick transition - not connected");
-            return;
+          // Clear buffers so the prompt doesn't include the wake phrase
+          wakeBufferRef.current = "";
+          captureFinalRef.current = afterWake;
+          captureInterimRef.current = "";
+          finalTranscriptRef.current = afterWake;
+          setVoicePreview(afterWake);
+          clearSilenceTimer();
+        }
+        return;
+      }
+
+      // --- CAPTURE MODE ---
+      captureInterimRef.current = interimChunk;
+      const liveText = stripWakeWord(
+        (captureFinalRef.current + " " + captureInterimRef.current).trim(),
+      );
+
+      finalTranscriptRef.current = liveText;
+      setVoicePreview(liveText);
+
+      // Auto-send after the user stops speaking for ~900ms
+      clearSilenceTimer();
+      silenceTimerRef.current = window.setTimeout(() => {
+        const toSend = stripWakeWord(finalTranscriptRef.current).trim();
+        if (!toSend) {
+          // User only said the wake word (or nothing meaningful)
+          resetToWakeMode();
+          return;
         }
 
+        // Send prompt (wake word never included)
+        handleSubmit(toSend);
+
+        // Reset back to wake mode
+        resetToWakeMode();
+      }, 900);
+    };
+
+    rec.onerror = (e: any) => {
+      console.error("[voice] recognition error", e);
+
+      // If user still wants voice enabled, restart after transient errors
+      recognitionRunningRef.current = false;
+
+      if (
+        voiceEnabledRef.current &&
+        (e?.error === "no-speech" ||
+          e?.error === "aborted" ||
+          e?.error === "network")
+      ) {
         try {
-            audioService.sendQuickTransition();
-        } catch (error) {
-            console.error("Error sending quick transition:", error);
-            setLoading(false);
-            if (loadingTimeoutRef.current)
-                clearTimeout(loadingTimeoutRef.current);
+          rec.stop();
+        } catch {
+          // ignore
         }
-    }, [connectionStatus, audioService]);
-
-    // Set up speech recognition once (stable instance)
-    // Wake mode: always listens for "hey tempo"
-    // Capture mode: after wake word, captures a prompt and auto-sends after brief silence
-    useEffect(() => {
-        const SpeechRecognition: undefined | (new () => any) =
-            (window as any).SpeechRecognition ||
-            (window as any).webkitSpeechRecognition;
-
-        if (!SpeechRecognition) return;
-
-        const rec = new SpeechRecognition();
-        rec.lang = "en-US";
-        rec.interimResults = true;
-        rec.continuous = true;
-        rec.maxAlternatives = 1;
-
-        const clearSilenceTimer = () => {
-            if (silenceTimerRef.current) {
-                window.clearTimeout(silenceTimerRef.current);
-                silenceTimerRef.current = null;
-            }
-        };
-
-        const stripWakeWord = (text: string) => {
-            // Remove wake word from any transcript before sending/previewing
-            const cleaned = (text || "")
-                .replace(/\bhey\s+tempo\b/gi, " ")
-                .replace(/\s+/g, " ")
-                .trim();
-            return cleaned;
-        };
-
-        const resetToWakeMode = () => {
-            setVoiceMode("wake");
-            voiceModeRef.current = "wake";
-            setIsListening(false);
-            setVoicePreview("");
-            wakeBufferRef.current = "";
-            captureFinalRef.current = "";
-            captureInterimRef.current = "";
-            finalTranscriptRef.current = "";
-            clearSilenceTimer();
-        };
-
-        rec.onstart = () => {
-            recognitionRunningRef.current = true;
-        };
-
-        rec.onresult = (event: any) => {
-            const mode = voiceModeRef.current;
-            // Process only new results to avoid re-building the entire transcript every time.
-            let interimChunk = "";
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const txt = (event.results[i]?.[0]?.transcript ?? "").trim();
-                if (!txt) continue;
-
-                if (event.results[i].isFinal) {
-                    if (mode === "capture") {
-                        const cleaned = stripWakeWord(txt);
-                        if (cleaned) {
-                            captureFinalRef.current =
-                                (captureFinalRef.current + " " + cleaned).trim();
-                        }
-                    } else {
-                        wakeBufferRef.current =
-                            (wakeBufferRef.current + " " + txt).trim();
-                    }
-                } else {
-                    // Keep interim for live preview, but never include the wake word
-                    const interimCleaned =
-                        mode === "capture" ? stripWakeWord(txt) : txt;
-                    interimChunk = (interimChunk + " " + interimCleaned).trim();
-                }
-            }
-
-            // --- WAKE MODE ---
-            if (mode === "wake") {
-                const combined =
-                    (wakeBufferRef.current + " " + interimChunk)
-                        .trim()
-                        .toLowerCase();
-
-                if (combined.includes(WAKE_WORD)) {
-                    // Switch to capture mode and start buffering the prompt
-                    voiceModeRef.current = "capture";
-                    setVoiceMode("capture");
-                    setIsListening(true);
-
-                    // If the wake phrase and prompt were spoken together, keep only the prompt part
-                    const afterWake = stripWakeWord(
-                        (wakeBufferRef.current + " " + interimChunk).trim(),
-                    );
-
-                    // Clear buffers so the prompt doesn't include the wake phrase
-                    wakeBufferRef.current = "";
-                    captureFinalRef.current = afterWake;
-                    captureInterimRef.current = "";
-                    finalTranscriptRef.current = afterWake;
-                    setVoicePreview(afterWake);
-                    clearSilenceTimer();
-                }
-                return;
-            }
-
-            // --- CAPTURE MODE ---
-            captureInterimRef.current = interimChunk;
-            const liveText = stripWakeWord(
-                (captureFinalRef.current + " " + captureInterimRef.current).trim(),
-            );
-
-            finalTranscriptRef.current = liveText;
-            setVoicePreview(liveText);
-
-            // Auto-send after the user stops speaking for ~900ms
-            clearSilenceTimer();
-            silenceTimerRef.current = window.setTimeout(() => {
-                const toSend = stripWakeWord(finalTranscriptRef.current).trim();
-                if (!toSend) {
-                    // User only said the wake word (or nothing meaningful)
-                    resetToWakeMode();
-                    return;
-                }
-
-                // Send prompt (wake word never included)
-                handleSubmit(toSend);
-
-                // Reset back to wake mode
-                resetToWakeMode();
-            }, 900);
-        };
-
-        rec.onerror = (e: any) => {
-            console.error("[voice] recognition error", e);
-
-            // If user still wants voice enabled, restart after transient errors
-            recognitionRunningRef.current = false;
-
-            if (
-                voiceEnabledRef.current &&
-                (e?.error === "no-speech" ||
-                    e?.error === "aborted" ||
-                    e?.error === "network")
-            ) {
-                try {
-                    rec.stop();
-                } catch {
-                    // ignore
-                }
-                setTimeout(() => {
-                    if (voiceEnabledRef.current) {
-                        try {
-                            rec.start();
-                        } catch {
-                            // ignore
-                        }
-                    }
-                }, 300);
-                return;
-            }
-
-            listeningRef.current = false;
-            setIsListening(false);
-            clearSilenceTimer();
-        };
-
-        rec.onend = () => {
-            recognitionRunningRef.current = false;
-
-            // Keep the recognizer running if voice is enabled
-            if (voiceEnabledRef.current && connectionStatus === "connected") {
-                try {
-                    if (!recognitionRunningRef.current) {
-                        rec.start();
-                    }
-                } catch {
-                    // ignore
-                }
-            }
-        };
-
-        recognitionRef.current = rec;
-
-        // Auto-start listening once we're connected (wake mode)
-        if (voiceEnabledRef.current && connectionStatus === "connected") {
-            listeningRef.current = true;
-            resetToWakeMode();
+        setTimeout(() => {
+          if (voiceEnabledRef.current) {
             try {
-                rec.start();
+              rec.start();
             } catch {
-                // ignore
+              // ignore
             }
-        }
+          }
+        }, 300);
+        return;
+      }
 
-        return () => {
-            listeningRef.current = false;
-            clearSilenceTimer();
-            try {
-                rec.onresult = null;
-                rec.onerror = null;
-                rec.onend = null;
-                rec.onstart = null;
-                rec.stop?.();
-            } catch {
-                // ignore
-            }
-            recognitionRef.current = null;
-            recognitionRunningRef.current = false;
-        };
-        // IMPORTANT: we intentionally depend on connectionStatus + voiceEnabled so auto-start/auto-restart behaves correctly
-    }, [handleSubmit, connectionStatus, voiceEnabled]);
+      listeningRef.current = false;
+      setIsListening(false);
+      clearSilenceTimer();
+    };
 
-    const startVoice = useCallback(() => {
-        const rec = recognitionRef.current;
-        if (!rec) return;
+    rec.onend = () => {
+      recognitionRunningRef.current = false;
 
+      // Keep the recognizer running if voice is enabled
+      if (voiceEnabledRef.current && connectionStatus === "connected") {
         try {
-            setVoiceEnabled(true);
-            voiceEnabledRef.current = true;
-
-            // Always start in wake mode (listening for the wake word)
-            voiceModeRef.current = "wake";
-            setVoiceMode("wake");
-            setIsListening(false);
-
-            // Clear buffers
-            wakeBufferRef.current = "";
-            captureFinalRef.current = "";
-            captureInterimRef.current = "";
-            finalTranscriptRef.current = "";
-            setVoicePreview("");
-
-            if (!recognitionRunningRef.current) {
-                rec.start?.();
-            }
-        } catch (e) {
-            console.error("[voice] start failed", e);
-            setIsListening(false);
+          if (!recognitionRunningRef.current) {
+            rec.start();
+          }
+        } catch {
+          // ignore
         }
-    }, []);
+      }
+    };
 
-    const stopVoice = useCallback(() => {
-        setVoiceEnabled(false);
-        voiceEnabledRef.current = false;
-        setVoiceMode("wake");
-        voiceModeRef.current = "wake";
-        listeningRef.current = false;
-        setIsListening(false);
+    recognitionRef.current = rec;
 
-        if (silenceTimerRef.current) {
-            window.clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-        }
+    // Auto-start listening once we're connected (wake mode)
+    if (voiceEnabledRef.current && connectionStatus === "connected") {
+      listeningRef.current = true;
+      resetToWakeMode();
+      try {
+        rec.start();
+      } catch {
+        // ignore
+      }
+    }
 
-        setVoicePreview("");
-        finalTranscriptRef.current = "";
-        wakeBufferRef.current = "";
-        captureFinalRef.current = "";
-        captureInterimRef.current = "";
+    return () => {
+      listeningRef.current = false;
+      clearSilenceTimer();
+      try {
+        rec.onresult = null;
+        rec.onerror = null;
+        rec.onend = null;
+        rec.onstart = null;
+        rec.stop?.();
+      } catch {
+        // ignore
+      }
+      recognitionRef.current = null;
+      recognitionRunningRef.current = false;
+    };
+    // IMPORTANT: we intentionally depend on connectionStatus + voiceEnabled so auto-start/auto-restart behaves correctly
+  }, [handleSubmit, connectionStatus, voiceEnabled]);
 
-        try {
-            recognitionRef.current?.stop?.();
-        } catch (e) {
-            console.error("[voice] stop failed", e);
-        }
-    }, []);
+  const startVoice = useCallback(() => {
+    const rec = recognitionRef.current;
+    if (!rec) return;
 
-    const collapseLibrary = useCallback(() => {
-        setIsLibraryCollapsed(true);
-    }, []);
+    try {
+      setVoiceEnabled(true);
+      voiceEnabledRef.current = true;
 
-    const expandLibrary = useCallback(() => {
-        setIsLibraryCollapsed(false);
-    }, []);
+      // Always start in wake mode (listening for the wake word)
+      voiceModeRef.current = "wake";
+      setVoiceMode("wake");
+      setIsListening(false);
 
-    const handleLibrarySongSelect = useCallback((title: string, artist: string) => {
-        const prettyPrompt = artist ? `play ${title} by ${artist}` : `play ${title}`;
-        handleSubmit(prettyPrompt);
-    }, [handleSubmit]);
+      // Clear buffers
+      wakeBufferRef.current = "";
+      captureFinalRef.current = "";
+      captureInterimRef.current = "";
+      finalTranscriptRef.current = "";
+      setVoicePreview("");
 
-    const handleQueueReorder = useCallback((newOrder: number[]) => {
-        audioService.sendReorderQueue(newOrder);
-    }, [audioService]);
+      if (!recognitionRunningRef.current) {
+        rec.start?.();
+      }
+    } catch (e) {
+      console.error("[voice] start failed", e);
+      setIsListening(false);
+    }
+  }, []);
 
-    const handleQueueRemove = useCallback((index: number) => {
-        audioService.sendRemoveFromQueue(index);
-    }, [audioService]);
+  const stopVoice = useCallback(() => {
+    setVoiceEnabled(false);
+    voiceEnabledRef.current = false;
+    setVoiceMode("wake");
+    voiceModeRef.current = "wake";
+    listeningRef.current = false;
+    setIsListening(false);
 
-    const handleRightPanelTabChange = useCallback((tab: "queue" | "logs") => {
-        setRightPanelTab(tab);
-    }, []);
+    if (silenceTimerRef.current) {
+      window.clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
 
-    const handleBassInputChange = useCallback((value: string) => {
-        setBassInput(value);
-    }, []);
+    setVoicePreview("");
+    finalTranscriptRef.current = "";
+    wakeBufferRef.current = "";
+    captureFinalRef.current = "";
+    captureInterimRef.current = "";
 
-    const commitBassInput = useCallback(() => {
-        const val = clamp(Number(bassInput) || 0, 0, 100);
-        setBassLevel(val);
-        setBassInput(String(val));
-        setIsEditingBass(false);
-    }, [bassInput]);
+    try {
+      recognitionRef.current?.stop?.();
+    } catch (e) {
+      console.error("[voice] stop failed", e);
+    }
+  }, []);
 
-    const handleBassInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (e.key === "Enter") {
-            commitBassInput();
-        }
-    }, [commitBassInput]);
+  const collapseLibrary = useCallback(() => {
+    setIsLibraryCollapsed(true);
+  }, []);
 
-    const startBassEditing = useCallback(() => {
-        setIsEditingBass(true);
-    }, []);
+  const expandLibrary = useCallback(() => {
+    setIsLibraryCollapsed(false);
+  }, []);
 
-    const handleAccountButtonClick = useCallback(() => {
-        if (isAuthenticated) {
-            navigate("/account");
-            return;
-        }
+  const handleLibrarySongSelect = useCallback(
+    (title: string, artist: string) => {
+      const prettyPrompt = artist
+        ? `play ${title} by ${artist}`
+        : `play ${title}`;
+      handleSubmit(prettyPrompt);
+    },
+    [handleSubmit],
+  );
 
-        setShowGuestLoginMenu((prev) => !prev);
-    }, [isAuthenticated, navigate]);
+  const handleQueueReorder = useCallback(
+    (newOrder: number[]) => {
+      audioService.sendReorderQueue(newOrder);
+    },
+    [audioService],
+  );
 
-    const handleGuestLoginClick = useCallback(() => {
-        setShowGuestLoginMenu(false);
-        navigate("/login");
-    }, [navigate]);
+  const handleQueueRemove = useCallback(
+    (index: number) => {
+      audioService.sendRemoveFromQueue(index);
+    },
+    [audioService],
+  );
 
-    const handleOpenRemoteModal = useCallback(() => {
-        if (connectionStatus !== "connected") {
-            addToast("Connect to the DJ before creating a mobile remote link.", "error");
-            return;
-        }
+  const handleRightPanelTabChange = useCallback((tab: "queue" | "logs") => {
+    setRightPanelTab(tab);
+  }, []);
 
-        setShowRemoteModal(true);
-        setIsRemotePairingLoading(true);
-        setRemotePairingUrl(null);
-        setRemotePairingExpiresAt(null);
-        audioService.sendMessage({ type: "create_remote_pairing" });
-    }, [addToast, audioService, connectionStatus]);
+  const handleBassInputChange = useCallback((value: string) => {
+    setBassInput(value);
+  }, []);
 
-    const handleCloseRemoteModal = useCallback(() => {
-        setShowRemoteModal(false);
-    }, []);
+  const commitBassInput = useCallback(() => {
+    const val = clamp(Number(bassInput) || 0, 0, 100);
+    setBassLevel(val);
+    setBassInput(String(val));
+    setIsEditingBass(false);
+  }, [bassInput]);
+
+  const handleBassInputKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        commitBassInput();
+      }
+    },
+    [commitBassInput],
+  );
+
+  const startBassEditing = useCallback(() => {
+    setIsEditingBass(true);
+  }, []);
+
+  const handleAccountButtonClick = useCallback(() => {
+    if (isAuthenticated) {
+      setIsHelpOpen(false);
+      navigate("/account");
+      return;
+    }
+
+    setIsHelpOpen(false);
+    setShowGuestLoginMenu((prev) => !prev);
+  }, [isAuthenticated, navigate]);
+
+  const handleGuestLoginClick = useCallback(() => {
+    setShowGuestLoginMenu(false);
+    setIsHelpOpen(false);
+    navigate("/login");
+  }, [navigate]);
+
+  const handleHelpOpenChange = useCallback((nextOpen: boolean) => {
+    setIsHelpOpen(nextOpen);
+    if (nextOpen) {
+      setShowGuestLoginMenu(false);
+    }
+  }, []);
+
+  const handleOpenRemoteModal = useCallback(() => {
+    if (connectionStatus !== "connected") {
+      addToast(
+        "Connect to the DJ before creating a mobile remote link.",
+        "error",
+      );
+      return;
+    }
+
+    setShowRemoteModal(true);
+    setIsRemotePairingLoading(true);
+    setRemotePairingUrl(null);
+    setRemotePairingExpiresAt(null);
+    audioService.sendMessage({ type: "create_remote_pairing" });
+  }, [addToast, audioService, connectionStatus]);
+
+  const handleCloseRemoteModal = useCallback(() => {
+    setShowRemoteModal(false);
+  }, []);
 
   return (
     <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
@@ -897,41 +940,45 @@ export default function Home() {
         onClose={handleCloseRemoteModal}
       />
 
-      {/* User account icon */}
-      <div ref={guestMenuRef} className="absolute top-4 left-4 z-20">
-        <button
-          onClick={handleAccountButtonClick}
-          title={
-            isAuthenticated
-              ? `Signed in as ${user?.username}`
-              : "Guest mode - open sign in options"
-          }
-          aria-expanded={!isAuthenticated && showGuestLoginMenu}
-          aria-haspopup={!isAuthenticated ? "menu" : undefined}
-          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-            isAuthenticated
-              ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
-              : "bg-white/10 border border-white/15 hover:bg-white/15 hover:border-white/25 cursor-pointer"
-          }`}
-        >
-          <UserCircle className="w-5 h-5 text-white/80" />
-        </button>
+      {/* User account + help */}
+      <div className="absolute top-4 left-4 z-20 flex items-start gap-2">
+        <div ref={guestMenuRef} className="relative">
+          <button
+            onClick={handleAccountButtonClick}
+            title={
+              isAuthenticated
+                ? `Signed in as ${user?.username}`
+                : "Guest mode - open sign in options"
+            }
+            aria-expanded={!isAuthenticated && showGuestLoginMenu}
+            aria-haspopup={!isAuthenticated ? "menu" : undefined}
+            className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+              isAuthenticated
+                ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+                : "bg-white/10 border border-white/15 hover:bg-white/15 hover:border-white/25 cursor-pointer"
+            }`}
+          >
+            <UserCircle className="w-5 h-5 text-white/80" />
+          </button>
 
-        {!isAuthenticated && showGuestLoginMenu && (
-          <div className="mt-3 w-44 rounded-2xl border border-white/10 bg-[#120922]/95 p-3 shadow-2xl backdrop-blur-xl">
-            <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">
-              Guest Mode
-            </p>
-            <button
-              type="button"
-              onClick={handleGuestLoginClick}
-              className="mt-3 w-full rounded-xl bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-500 cursor-pointer flex items-center justify-center gap-2"
-            >
-              <LogIn className="w-4 h-4" />
-              Log In
-            </button>
-          </div>
-        )}
+          {!isAuthenticated && showGuestLoginMenu && (
+            <div className="absolute top-12 left-0 mt-1 w-44 rounded-2xl border border-white/10 bg-[#120922]/95 p-3 shadow-2xl backdrop-blur-xl">
+              <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">
+                Guest Mode
+              </p>
+              <button
+                type="button"
+                onClick={handleGuestLoginClick}
+                className="mt-3 w-full rounded-xl bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-500 cursor-pointer flex items-center justify-center gap-2"
+              >
+                <LogIn className="w-4 h-4" />
+                Log In
+              </button>
+            </div>
+          )}
+        </div>
+
+        <DJHelpButton isOpen={isHelpOpen} onOpenChange={handleHelpOpenChange} />
       </div>
 
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
@@ -1064,7 +1111,6 @@ export default function Home() {
                     : "Disconnected"}
               </span>
             </div>
-
           </div>
 
           {/* Music mode content - fades in when playing */}

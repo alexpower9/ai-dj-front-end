@@ -3,10 +3,12 @@ import { CircleHelp } from "lucide-react";
 
 type DJHelpButtonProps = {
   title?: string;
-  steps?: string[];
+  tips?: string[];
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
-const defaultSteps = [
+const defaultTips = [
   "LOGIN: Create an account or sign in to save setlists, upload your own songs, and control your personal library. You can still explore the DJ as a guest, but saved features are tied to your account.",
   "LIBRARY: Browse the available songs in the system library. Logged-in users can also upload personal tracks and use them in requests, queues, and setlists.",
   "REQUESTS: Ask for songs in natural language, such as 'Play Wake Me Up by Avicii', 'Queue Stargazing', or 'Give me a chill late-night mix'. The AI DJ will try to match the request and keep the queue moving.",
@@ -22,10 +24,24 @@ const defaultSteps = [
 ];
 
 export default function DJHelpButton({
-  title = "How to use",
-  steps = defaultSteps,
+  title = "Quick Help",
+  tips = defaultTips,
+  isOpen,
+  onOpenChange,
 }: DJHelpButtonProps) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = isOpen ?? internalOpen;
+  const setOpen = (next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved =
+      typeof next === "function"
+        ? (next as (prev: boolean) => boolean)(open)
+        : next;
+    if (onOpenChange) {
+      onOpenChange(resolved);
+      return;
+    }
+    setInternalOpen(resolved);
+  };
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -114,10 +130,10 @@ export default function DJHelpButton({
           </button>
 
           <h3 className="text-xs tracking-widest text-white/60 uppercase mb-2">
-            Help
+            Quick Help
           </h3>
           <ul className="help-scroll max-h-64 overflow-y-auto pr-2 space-y-1.5 list-disc pl-4 text-white/80">
-            {steps.map((step, index) => (
+            {tips.map((step, index) => (
               <li key={`${step}-${index}`}>{step}</li>
             ))}
           </ul>
