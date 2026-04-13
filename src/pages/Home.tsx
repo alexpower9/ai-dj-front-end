@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useDeferredValue, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import LibrarySidebar from "../components/LibrarySidebar";
 import PromptBox from "../components/PromptBox";
 import Waveform from "../components/Waveform";
 import PlaybackTimeline from "../components/PlaybackTimeline";
-import QueuePanel from "../components/QueuePanel";
+import RightPanel from "../components/RightPanel";
 import TrackInfo from "../components/TrackInfo";
 import TransitionInfo from "../components/TransitionInfo";
+import VolumeControl from "../components/VolumeControl";
 import {
     AudioStreamService,
     type TrackInfo as TrackInfoType,
@@ -16,19 +18,18 @@ import {
     MicVocal,
     Mic,
     MicOff,
-    ChevronLeft,
-    ChevronRight,
+    QrCode,
+    LogIn,
+    ShieldCheck,
     UserCircle,
     Play,
     Pause,
     SkipForward,
-    Volume2,
-    VolumeX,
-    ShieldCheck,
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
 import DJHelpButton from "../components/DJHelpButton.tsx";
 import { useAuth } from "../context/AuthContext";
+import RemotePairingModal from "../components/RemotePairingModal";
 
 type LibrarySong = {
     id?: string;
@@ -39,13 +40,16 @@ type LibrarySong = {
     scale?: string;
 };
 
+const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+
 export default function Home() {
     const navigate = useNavigate();
     const location = useLocation();
-    // ↓ added isDev
     const { isAuthenticated, token, user, isDev } = useAuth();
     const [audioService] = useState(() => new AudioStreamService());
     const [loading, setLoading] = useState(false);
+    const guestMenuRef = useRef<HTMLDivElement | null>(null);
     const setlistId = (location.state as { setlistId?: string } | null)
         ?.setlistId;
 
@@ -83,282 +87,374 @@ export default function Home() {
         }
     }, [token]);
 
-    const [connectionStatus, setConnectionStatus] = useState<
-        "connecting" | "connected" | "disconnected"
-    >("connecting");
+  const [connectionStatus, setConnectionStatus] = useState<
+    "connecting" | "connected" | "disconnected"
+  >("connecting");
 
-    //Upload Song State
-    const [showUploadModal, setShowUploadModal] = useState(false);
+  //Upload Song State
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showGuestLoginMenu, setShowGuestLoginMenu] = useState(false);
+  const [showRemoteModal, setShowRemoteModal] = useState(false);
+  const [isRemotePairingLoading, setIsRemotePairingLoading] = useState(false);
+  const [remotePairingUrl, setRemotePairingUrl] = useState<string | null>(null);
+  const [remotePairingExpiresAt, setRemotePairingExpiresAt] = useState<string | null>(null);
 
-    // Library sidebar collapse state
-    const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
+  // Library sidebar collapse state
+  const [isLibraryCollapsed, setIsLibraryCollapsed] = useState(false);
 
-    // Music mode state
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [inputMode, setInputMode] = useState<"prompt" | "controls">("prompt");
-    const [isPaused, setIsPaused] = useState(false);
-    const [volume, setVolume] = useState(1);
+  // Music mode state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [inputMode, setInputMode] = useState<"prompt" | "controls">("prompt");
+  const [isPaused, setIsPaused] = useState(false);
+  const [volume, setVolume] = useState(1);
 
-    // Voice input (browser speech-to-text)
-    const SpeechRecognitionCtor: any =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
-    const speechSupported = !!SpeechRecognitionCtor;
-    const recognitionRef = useRef<any>(null);
-    const [isListening, setIsListening] = useState(false);
-    const [voicePreview, setVoicePreview] = useState("");
-    const listeningRef = useRef(false);
-    const silenceTimerRef = useRef<number | null>(null);
-    const finalTranscriptRef = useRef("");
-    // Wake-word voice control
-    const WAKE_WORD = "hey tempo";
-    const [voiceEnabled, setVoiceEnabled] = useState(true);
-    const [voiceMode, setVoiceMode] = useState<"wake" | "capture">("wake");
-    const voiceEnabledRef = useRef(true);
-    const voiceModeRef = useRef<"wake" | "capture">("wake");
+  // Voice input (browser speech-to-text)
+  const SpeechRecognitionCtor: any =
+    (window as any).SpeechRecognition ||
+    (window as any).webkitSpeechRecognition;
+  const speechSupported = !!SpeechRecognitionCtor;
+  const recognitionRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [voicePreview, setVoicePreview] = useState("");
+  const listeningRef = useRef(false);
+  const silenceTimerRef = useRef<number | null>(null);
+  const finalTranscriptRef = useRef("");
+  // Wake-word voice control
+  const WAKE_WORD = "hey tempo";
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [voiceMode, setVoiceMode] = useState<"wake" | "capture">("wake");
+  const voiceEnabledRef = useRef(true);
+  const voiceModeRef = useRef<"wake" | "capture">("wake");
 
-    useEffect(() => {
-        voiceEnabledRef.current = voiceEnabled;
-    }, [voiceEnabled]);
+  useEffect(() => {
+    voiceEnabledRef.current = voiceEnabled;
+  }, [voiceEnabled]);
 
-    useEffect(() => {
-        voiceModeRef.current = voiceMode;
-    }, [voiceMode]);
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
 
-    const wakeBufferRef = useRef("");
-    const captureFinalRef = useRef("");
-    const captureInterimRef = useRef("");
-    const recognitionRunningRef = useRef(false);
-    const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(
-        null,
-    );
-    const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  useEffect(() => {
+    if (isAuthenticated) {
+      setShowGuestLoginMenu(false);
+    }
+  }, [isAuthenticated]);
 
-    // Ref so callbacks can see the latest currentTrack
-    const currentTrackRef = useRef<TrackInfoType | null>(null);
-    useEffect(() => {
-        currentTrackRef.current = currentTrack;
-    }, [currentTrack]);
+  useEffect(() => {
+    if (!showGuestLoginMenu) return;
 
-    // Transition state
-    const [pendingTransition, setPendingTransition] =
-        useState<TransitionInfoType | null>(null);
-    const [isTransitioning, setIsTransitioning] = useState(false);
-    const [isQuickTransitionPending, setIsQuickTransitionPending] =
-        useState(false);
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        guestMenuRef.current &&
+        !guestMenuRef.current.contains(event.target as Node)
+      ) {
+        setShowGuestLoginMenu(false);
+      }
+    };
 
-    // Music time / progress
-    const [currentTime, setCurrentTime] = useState(0); // seconds
-    const [duration, setDuration] = useState(0); // seconds
-    const [transitionPoints, setTransitionPoints] = useState<number[]>([]);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowGuestLoginMenu(false);
+      }
+    };
 
-    // Queue state
-    const [previousTrack, setPreviousTrack] = useState<TrackInfoType | null>(
-        null,
-    );
-    const [upNext, setUpNext] = useState<TrackInfoType[]>([]);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
 
-    // Backend log state
-    const [backendLogs, setBackendLogs] = useState<string[]>([]);
-    const [rightPanelTab, setRightPanelTab] = useState<"queue" | "logs">(
-        "queue",
-    );
-    const logEndRef = useRef<HTMLDivElement>(null);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showGuestLoginMenu]);
 
-    // Toast notifications
-    const [toasts, setToasts] = useState<
-        { id: number; message: string; type: "error" | "info" | "success" }[]
-    >([]);
-    const toastIdRef = useRef(0);
+  const wakeBufferRef = useRef("");
+  const captureFinalRef = useRef("");
+  const captureInterimRef = useRef("");
+  const recognitionRunningRef = useRef(false);
+  const [currentTrack, setCurrentTrack] = useState<TrackInfoType | null>(null);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
 
-    // EQ / Bass UI (frontend concept only)
-    const [bassLevel, setBassLevel] = useState(50); // 0..100
-    const [isEditingBass, setIsEditingBass] = useState(false);
-    const [bassInput, setBassInput] = useState(String(bassLevel));
+  // Ref so callbacks can see the latest currentTrack
+  const currentTrackRef = useRef<TrackInfoType | null>(null);
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
 
-    const clamp = (v: number, min: number, max: number) =>
-        Math.max(min, Math.min(max, v));
+  // Transition state
+  const [pendingTransition, setPendingTransition] =
+    useState<TransitionInfoType | null>(null);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [isQuickTransitionPending, setIsQuickTransitionPending] =
+    useState(false);
 
-    // Push bass UI value into WebAudio (client-side) whenever it changes
-    useEffect(() => {
-        try {
-            (audioService as any).setBass?.(bassLevel);
-        } catch (e) {
-            console.warn("setBass failed:", e);
+  // Music time / progress
+  const [currentTime, setCurrentTime] = useState(0); // seconds
+  const [duration, setDuration] = useState(0); // seconds
+  const [transitionPoints, setTransitionPoints] = useState<number[]>([]);
+
+  // Queue state
+  const [previousTrack, setPreviousTrack] = useState<TrackInfoType | null>(
+    null,
+  );
+  const [upNext, setUpNext] = useState<TrackInfoType[]>([]);
+
+  // Backend log state
+  const [backendLogs, setBackendLogs] = useState<string[]>([]);
+  const [rightPanelTab, setRightPanelTab] = useState<"queue" | "logs">("queue");
+  const deferredBackendLogs = useDeferredValue(backendLogs);
+  const pendingLogLinesRef = useRef<string[]>([]);
+  const logFlushTimerRef = useRef<number | null>(null);
+
+  // Toast notifications
+  const [toasts, setToasts] = useState<
+    { id: number; message: string; type: "error" | "info" | "success" }[]
+  >([]);
+  const toastIdRef = useRef(0);
+
+  // EQ / Bass UI (frontend concept only)
+  const [bassLevel, setBassLevel] = useState(50); // 0..100
+  const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
+    null,
+  );
+  const [isEditingBass, setIsEditingBass] = useState(false);
+  const [bassInput, setBassInput] = useState(String(bassLevel));
+
+  // Push bass UI value into WebAudio (client-side) whenever it changes
+  useEffect(() => {
+    try {
+      (audioService as any).setBass?.(bassLevel);
+    } catch (e) {
+      console.warn("setBass failed:", e);
+    }
+  }, [bassLevel, audioService]);
+
+  // Map 0..100 => -135deg .. +135deg (classic knob sweep)
+  const bassAngle = -135 + (bassLevel / 100) * 270;
+
+  const onKnobPointerDown = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    try {
+      (e.currentTarget as any).setPointerCapture?.(e.pointerId);
+    } catch {
+      // ignore
+    }
+    knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
+  }, [bassLevel]);
+
+  const onKnobPointerMove = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (!knobDragRef.current) return;
+
+    const deltaY = knobDragRef.current.startY - e.clientY;
+    const next = knobDragRef.current.startValue + deltaY * 0.35;
+    const clampedVal = clamp(Math.round(next), 0, 100);
+
+    setBassLevel(clampedVal);
+    setBassInput(String(clampedVal));
+  }, []);
+
+  const onKnobPointerUp = useCallback(() => {
+    knobDragRef.current = null;
+  }, []);
+
+  const addToast = useCallback(
+    (message: string, type: "error" | "info" | "success" = "info") => {
+      const id = ++toastIdRef.current;
+      setToasts((prev) => [...prev, { id, message, type }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 5000);
+    },
+    [],
+  );
+
+  const flushBufferedLogs = useCallback(() => {
+    logFlushTimerRef.current = null;
+
+    if (pendingLogLinesRef.current.length === 0) return;
+
+    const nextLines = pendingLogLinesRef.current;
+    pendingLogLinesRef.current = [];
+
+    setBackendLogs((prev) => {
+      const updated = [...prev, ...nextLines];
+      return updated.length > 200 ? updated.slice(-200) : updated;
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (logFlushTimerRef.current !== null) {
+        window.clearTimeout(logFlushTimerRef.current);
+      }
+    };
+  }, []);
+
+  const trackKey = (t: TrackInfoType | null) =>
+    t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
+
+  // Simple timer to simulate playback progress while a track is playing
+  useEffect(() => {
+    if (!isPlaying || isPaused || duration <= 0) return;
+
+    const interval = window.setInterval(() => {
+      setCurrentTime((prev) => {
+        if (prev >= duration) return duration;
+        return prev + 0.5; // update every 0.5s
+      });
+    }, 500);
+
+    return () => window.clearInterval(interval);
+  }, [isPlaying, isPaused, duration]);
+
+  useEffect(() => {
+    // Load library once on mount
+    refreshLibrary();
+
+    // Set up audio service callbacks
+    audioService.setCallbacks({
+      onTrackStart: (track) => {
+        console.log("Track started:", track);
+
+        // old current becomes previous
+        setPreviousTrack(currentTrackRef.current);
+
+        // new current
+        setCurrentTrack(track);
+        setIsPlaying(true);
+        setLoading(false);
+        setIsPaused(false);
+
+        // reset progress (use start_offset for post-transition tracks)
+        setCurrentTime(track.startOffset || 0);
+
+        // try to pull duration & transition points off the track if backend sends them
+        const t: any = track as any;
+        const trackDuration = t?.duration ?? 0;
+        const transitionsRaw =
+          t?.transition_points ?? t?.transitionPoints ?? [];
+
+        setDuration(typeof trackDuration === "number" ? trackDuration : 0);
+        setTransitionPoints(
+          Array.isArray(transitionsRaw)
+            ? transitionsRaw.filter((n: any) => typeof n === "number")
+            : [],
+        );
+
+        // Clear transition info when new track's audio actually starts
+        setPendingTransition(null);
+        setIsTransitioning(false);
+
+        // Keep the queued list, but remove the track that just started (so the queue represents "up next")
+        setUpNext((prev) =>
+          prev.filter((t) => trackKey(t) !== trackKey(track)),
+        );
+      },
+      onTrackEnd: () => {
+        console.log("Track ended");
+        // wait for queue_empty before fully exiting
+      },
+      onQueueEmpty: () => {
+        console.log("Queue empty - exiting music mode");
+        setIsPlaying(false);
+        setCurrentTrack(null);
+        setIsPaused(false);
+        setPendingTransition(null);
+        setIsTransitioning(false);
+        setCurrentTime(0);
+        setDuration(0);
+        setTransitionPoints([]);
+        setUpNext([]);
+      },
+      onQueueUpdate: (queue: any) => {
+        // The audioStream service now extracts the queue array for us
+        const upcoming = Array.isArray(queue) ? queue : [];
+        setUpNext(upcoming);
+        // A queue update confirms the backend processed our prompt, so clear loading state
+        setLoading(false);
+      },
+      onError: (message) => {
+        console.error("Audio error:", message);
+        addToast(message, "error");
+        setLoading(false);
+        setIsRemotePairingLoading(false);
+      },
+      onInfo: (_type, _message) => {
+        // Backend responded but no song was queued/played — clear the loading spinner
+        setLoading(false);
+      },
+      onRemotePairingCreated: ({ pairingToken, expiresAt }) => {
+        const remoteUrl = new URL("/remote", window.location.origin);
+        remoteUrl.searchParams.set("pair", pairingToken);
+
+        setRemotePairingUrl(remoteUrl.toString());
+        setRemotePairingExpiresAt(expiresAt);
+        setIsRemotePairingLoading(false);
+        setShowRemoteModal(true);
+      },
+      onPlaybackStateChange: (paused) => {
+        setIsPaused(paused);
+      },
+      // Transition callbacks
+      onTransitionPlanned: (transition) => {
+        console.log("Transition planned:", transition);
+        setPendingTransition(transition);
+
+        if ((transition as any).is_quick) {
+          setIsQuickTransitionPending(true);
+
+          setTimeout(() => setIsQuickTransitionPending(false), 500);
         }
-    }, [bassLevel, audioService]);
+      },
+      onTransitionStart: (transition) => {
+        console.log("Transition starting:", transition);
+        setPendingTransition(transition);
+        setIsTransitioning(true);
+      },
+      onTransitionComplete: (nowPlaying) => {
+        console.log(
+          "Transition complete (backend streaming finished), now playing:",
+          nowPlaying,
+        );
+        // don't clear here; onTrackStart will clean it up
+      },
+      onBackendLog: (lines) => {
+        pendingLogLinesRef.current.push(...lines);
+        if (logFlushTimerRef.current === null) {
+          logFlushTimerRef.current = window.setTimeout(flushBufferedLogs, 80);
+        }
+      },
+    });
 
-    const addToast = useCallback(
-        (message: string, type: "error" | "info" | "success" = "info") => {
-            const id = ++toastIdRef.current;
-            setToasts((prev) => [...prev, { id, message, type }]);
-            setTimeout(() => {
-                setToasts((prev) => prev.filter((t) => t.id !== id));
-            }, 5000);
-        },
-        [],
-    );
+    // Connect when component mounts
+    const connectWebSocket = async () => {
+      try {
+        await audioService.connect(token);
+        setConnectionStatus("connected");
 
-    const trackKey = (t: TrackInfoType | null) =>
-        t ? `${t.title ?? ""}::${t.artist ?? ""}` : "";
+        const analyser = audioService.getAnalyserNode();
+        setAnalyserNode(analyser);
 
-    // Simple timer to simulate playback progress while a track is playing
-    useEffect(() => {
-        if (!isPlaying || isPaused || duration <= 0) return;
+        if (setlistId) {
+          audioService.sendMessage({
+            type: "load_setlist",
+            setlist_id: setlistId,
+          });
+          window.history.replaceState({}, document.title);
+        }
+      } catch (error) {
+        console.error("Failed to connect to WebSocket:", error);
+        setConnectionStatus("disconnected");
+      }
+    };
 
-        const interval = window.setInterval(() => {
-            setCurrentTime((prev) => {
-                if (prev >= duration) return duration;
-                return prev + 0.5; // update every 0.5s
-            });
-        }, 500);
+    connectWebSocket();
 
-        return () => window.clearInterval(interval);
-    }, [isPlaying, isPaused, duration]);
-
-    useEffect(() => {
-        // Load library once on mount
-        refreshLibrary();
-
-        // Set up audio service callbacks
-        audioService.setCallbacks({
-            onTrackStart: (track) => {
-                console.log("Track started:", track);
-
-                // old current becomes previous
-                setPreviousTrack(currentTrackRef.current);
-
-                // new current
-                setCurrentTrack(track);
-                setIsPlaying(true);
-                setLoading(false);
-                setIsPaused(false);
-
-                // reset progress (use start_offset for post-transition tracks)
-                setCurrentTime(track.startOffset || 0);
-
-                // try to pull duration & transition points off the track if backend sends them
-                const t: any = track as any;
-                const trackDuration = t?.duration ?? 0;
-                const transitionsRaw =
-                    t?.transition_points ?? t?.transitionPoints ?? [];
-
-                setDuration(
-                    typeof trackDuration === "number" ? trackDuration : 0,
-                );
-                setTransitionPoints(
-                    Array.isArray(transitionsRaw)
-                        ? transitionsRaw.filter(
-                              (n: any) => typeof n === "number",
-                          )
-                        : [],
-                );
-
-                // Clear transition info when new track's audio actually starts
-                setPendingTransition(null);
-                setIsTransitioning(false);
-
-                // Keep the queued list, but remove the track that just started (so the queue represents "up next")
-                setUpNext((prev) =>
-                    prev.filter((t) => trackKey(t) !== trackKey(track)),
-                );
-            },
-            onTrackEnd: () => {
-                console.log("Track ended");
-                // wait for queue_empty before fully exiting
-            },
-            onQueueEmpty: () => {
-                console.log("Queue empty - exiting music mode");
-                setIsPlaying(false);
-                setCurrentTrack(null);
-                setIsPaused(false);
-                setPendingTransition(null);
-                setIsTransitioning(false);
-                setCurrentTime(0);
-                setDuration(0);
-                setTransitionPoints([]);
-                setUpNext([]);
-            },
-            onQueueUpdate: (queue: any) => {
-                // The audioStream service now extracts the queue array for us
-                const upcoming = Array.isArray(queue) ? queue : [];
-                setUpNext(upcoming);
-                // A queue update confirms the backend processed our prompt, so clear loading state
-                setLoading(false);
-            },
-            onError: (message) => {
-                console.error("Audio error:", message);
-                addToast(message, "error");
-                setLoading(false);
-            },
-            onInfo: (_type, _message) => {
-                // Backend responded but no song was queued/played — clear the loading spinner
-                setLoading(false);
-            },
-            // Transition callbacks
-            onTransitionPlanned: (transition) => {
-                console.log("Transition planned:", transition);
-                setPendingTransition(transition);
-
-                if ((transition as any).is_quick) {
-                    setIsQuickTransitionPending(true);
-
-                    setTimeout(() => setIsQuickTransitionPending(false), 500);
-                }
-            },
-            onTransitionStart: (transition) => {
-                console.log("Transition starting:", transition);
-                setPendingTransition(transition);
-                setIsTransitioning(true);
-            },
-            onTransitionComplete: (nowPlaying) => {
-                console.log(
-                    "Transition complete (backend streaming finished), now playing:",
-                    nowPlaying,
-                );
-                // don't clear here; onTrackStart will clean it up
-            },
-            onBackendLog: (lines) => {
-                setBackendLogs((prev) => {
-                    const updated = [...prev, ...lines];
-                    return updated.length > 200 ? updated.slice(-200) : updated;
-                });
-                // Auto-scroll to bottom
-                requestAnimationFrame(() => {
-                    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
-                });
-            },
-        });
-
-        // Connect when component mounts
-        const connectWebSocket = async () => {
-            try {
-                await audioService.connect(token);
-                setConnectionStatus("connected");
-
-                const analyser = audioService.getAnalyserNode();
-                setAnalyserNode(analyser);
-
-                if (setlistId) {
-                    audioService.sendMessage({
-                        type: "load_setlist",
-                        setlist_id: setlistId,
-                    });
-                    window.history.replaceState({}, document.title);
-                }
-            } catch (error) {
-                console.error("Failed to connect to WebSocket:", error);
-                setConnectionStatus("disconnected");
-            }
-        };
-
-        connectWebSocket();
-
-        // Disconnect when component unmounts
-        return () => {
-            audioService.disconnect();
-        };
-    }, [addToast, audioService, refreshLibrary, setlistId, token]);
+    // Disconnect when component unmounts
+    return () => {
+      audioService.disconnect();
+    };
+  }, [addToast, audioService, flushBufferedLogs, refreshLibrary, setlistId, token]);
 
     const loadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
         null,
@@ -394,6 +490,22 @@ export default function Home() {
         },
         [connectionStatus, audioService],
     );
+
+    const handleQuickTransition = useCallback(() => {
+        if (connectionStatus !== "connected") {
+            console.error("Cannot send quick transition - not connected");
+            return;
+        }
+
+        try {
+            audioService.sendQuickTransition();
+        } catch (error) {
+            console.error("Error sending quick transition:", error);
+            setLoading(false);
+            if (loadingTimeoutRef.current)
+                clearTimeout(loadingTimeoutRef.current);
+        }
+    }, [connectionStatus, audioService]);
 
     // Set up speech recognition once (stable instance)
     // Wake mode: always listens for "hey tempo"
@@ -455,18 +567,12 @@ export default function Home() {
                     if (mode === "capture") {
                         const cleaned = stripWakeWord(txt);
                         if (cleaned) {
-                            captureFinalRef.current = (
-                                captureFinalRef.current +
-                                " " +
-                                cleaned
-                            ).trim();
+                            captureFinalRef.current =
+                                (captureFinalRef.current + " " + cleaned).trim();
                         }
                     } else {
-                        wakeBufferRef.current = (
-                            wakeBufferRef.current +
-                            " " +
-                            txt
-                        ).trim();
+                        wakeBufferRef.current =
+                            (wakeBufferRef.current + " " + txt).trim();
                     }
                 } else {
                     // Keep interim for live preview, but never include the wake word
@@ -478,9 +584,10 @@ export default function Home() {
 
             // --- WAKE MODE ---
             if (mode === "wake") {
-                const combined = (wakeBufferRef.current + " " + interimChunk)
-                    .trim()
-                    .toLowerCase();
+                const combined =
+                    (wakeBufferRef.current + " " + interimChunk)
+                        .trim()
+                        .toLowerCase();
 
                 if (combined.includes(WAKE_WORD)) {
                     // Switch to capture mode and start buffering the prompt
@@ -507,11 +614,7 @@ export default function Home() {
             // --- CAPTURE MODE ---
             captureInterimRef.current = interimChunk;
             const liveText = stripWakeWord(
-                (
-                    captureFinalRef.current +
-                    " " +
-                    captureInterimRef.current
-                ).trim(),
+                (captureFinalRef.current + " " + captureInterimRef.current).trim(),
             );
 
             finalTranscriptRef.current = liveText;
@@ -670,918 +773,523 @@ export default function Home() {
         }
     }, []);
 
-    return (
-        <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
-            <style>{`
-        .bass-vertical-slider {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 88px;
-        height: 18px;
-        background: transparent;
-        cursor: pointer;
-        transform: rotate(-90deg);
-        transform-origin: center;
+    const collapseLibrary = useCallback(() => {
+        setIsLibraryCollapsed(true);
+    }, []);
+
+    const expandLibrary = useCallback(() => {
+        setIsLibraryCollapsed(false);
+    }, []);
+
+    const handleLibrarySongSelect = useCallback((title: string, artist: string) => {
+        const prettyPrompt = artist ? `play ${title} by ${artist}` : `play ${title}`;
+        handleSubmit(prettyPrompt);
+    }, [handleSubmit]);
+
+    const handleQueueReorder = useCallback((newOrder: number[]) => {
+        audioService.sendReorderQueue(newOrder);
+    }, [audioService]);
+
+    const handleQueueRemove = useCallback((index: number) => {
+        audioService.sendRemoveFromQueue(index);
+    }, [audioService]);
+
+    const handleRightPanelTabChange = useCallback((tab: "queue" | "logs") => {
+        setRightPanelTab(tab);
+    }, []);
+
+    const handleBassInputChange = useCallback((value: string) => {
+        setBassInput(value);
+    }, []);
+
+    const commitBassInput = useCallback(() => {
+        const val = clamp(Number(bassInput) || 0, 0, 100);
+        setBassLevel(val);
+        setBassInput(String(val));
+        setIsEditingBass(false);
+    }, [bassInput]);
+
+    const handleBassInputKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter") {
+            commitBassInput();
+        }
+    }, [commitBassInput]);
+
+    const startBassEditing = useCallback(() => {
+        setIsEditingBass(true);
+    }, []);
+
+    const handleAccountButtonClick = useCallback(() => {
+        if (isAuthenticated) {
+            navigate("/account");
+            return;
         }
 
-        .bass-vertical-slider::-webkit-slider-runnable-track {
-        height: 6px;
-        border-radius: 9999px;
-        background: rgba(255, 255, 255, 0.12);
+        setShowGuestLoginMenu((prev) => !prev);
+    }, [isAuthenticated, navigate]);
+
+    const handleGuestLoginClick = useCallback(() => {
+        setShowGuestLoginMenu(false);
+        navigate("/login");
+    }, [navigate]);
+
+    const handleOpenRemoteModal = useCallback(() => {
+        if (connectionStatus !== "connected") {
+            addToast("Connect to the DJ before creating a mobile remote link.", "error");
+            return;
         }
 
-        .bass-vertical-slider::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 9999px;
-        background: linear-gradient(180deg, rgba(34,211,238,1) 0%, rgba(139,92,246,1) 100%);
-        border: 2px solid rgba(255,255,255,0.65);
-        box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
-        margin-top: -6px;
-        }
+        setShowRemoteModal(true);
+        setIsRemotePairingLoading(true);
+        setRemotePairingUrl(null);
+        setRemotePairingExpiresAt(null);
+        audioService.sendMessage({ type: "create_remote_pairing" });
+    }, [addToast, audioService, connectionStatus]);
 
-        .bass-vertical-slider::-moz-range-track {
-        height: 6px;
-        border-radius: 9999px;
-        background: rgba(255, 255, 255, 0.12);
-        }
+    const handleCloseRemoteModal = useCallback(() => {
+        setShowRemoteModal(false);
+    }, []);
 
-        .bass-vertical-slider::-moz-range-thumb {
-        width: 18px;
-        height: 18px;
-        border-radius: 9999px;
-        background: linear-gradient(180deg, rgba(34,211,238,1) 0%, rgba(139,92,246,1) 100%);
-        border: 2px solid rgba(255,255,255,0.65);
-        box-shadow: 0 0 10px rgba(34, 211, 238, 0.45);
-        }
-
-        .eq-placeholder-slider {
-          width: 88px;
-          height: 18px;
-          transform: rotate(-90deg);
-          transform-origin: center;
-          opacity: 0.35;
-          pointer-events: none;
-          accent-color: rgba(255, 255, 255, 0.35);
-        }
-
-        .eq-placeholder-slider::-webkit-slider-runnable-track {
-          height: 6px;
-          border-radius: 9999px;
-          background: rgba(255, 255, 255, 0.08);
-        }
-
-        .eq-placeholder-slider::-webkit-slider-thumb {
-          -webkit-appearance: none;
-          appearance: none;
-          width: 16px;
-          height: 16px;
-          border-radius: 9999px;
-          background: rgba(255, 255, 255, 0.45);
-          border: 2px solid rgba(255,255,255,0.25);
-          box-shadow: none;
-          margin-top: -5px;
-        }
-
-        .eq-placeholder-slider::-moz-range-track {
-          height: 6px;
-          border-radius: 9999px;
-          background: rgba(255, 255, 255, 0.08);
-        }
-
-        .eq-placeholder-slider::-moz-range-thumb {
-          width: 16px;
-          height: 16px;
-          border-radius: 9999px;
-          background: rgba(255, 255, 255, 0.45);
-          border: 2px solid rgba(255,255,255,0.25);
-          box-shadow: none;
-        }
-      `}</style>
-
-            {/* Toast notifications */}
-            {toasts.length > 0 && (
-                <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
-                    {toasts.map((toast) => (
-                        <div
-                            key={toast.id}
-                            className={`pointer-events-auto px-5 py-3 rounded-xl shadow-lg backdrop-blur-md text-sm font-medium animate-fade-in-down max-w-md text-center ${
-                                toast.type === "error"
-                                    ? "bg-red-500/90 text-white"
-                                    : toast.type === "success"
-                                      ? "bg-green-500/90 text-white"
-                                      : "bg-white/15 text-white border border-white/20"
-                            }`}
-                            onClick={() =>
-                                setToasts((prev) =>
-                                    prev.filter((t) => t.id !== toast.id),
-                                )
-                            }
-                        >
-                            {toast.message}
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* ── Dev / admin badge — top-center, only for dev accounts ── */}
-            {isDev && (
-                <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 backdrop-blur-md shadow-lg pointer-events-none select-none">
-                    <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="text-[11px] font-semibold tracking-widest text-amber-300 uppercase">
-                        Admin
-                    </span>
-                    {user?.username && (
-                        <span className="text-[11px] text-amber-400/70 ml-0.5">
-                            · {user.username}
-                        </span>
-                    )}
-                </div>
-            )}
-
-            {/* User account + help */}
-            <div className="absolute top-4 left-4 z-20 flex items-start gap-2">
-                <button
-                    onClick={() => isAuthenticated && navigate("/account")}
-                    title={
-                        isAuthenticated
-                            ? `Signed in as ${user?.username}`
-                            : "Guest — sign in to access your account"
-                    }
-                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                        isAuthenticated
-                            ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
-                            : "bg-white/5 border border-white/10 opacity-50 cursor-default"
-                    }`}
-                >
-                    <UserCircle className="w-5 h-5 text-white/80" />
-                </button>
-
-                <DJHelpButton />
-            </div>
-
-            {/* Add Upload Button */}
-            <button
-                onClick={() => setShowUploadModal(true)}
-                className="absolute top-4 right-4 z-20 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
-            >
-                <Upload className="w-v h-4" />
-                Upload Song
-            </button>
-
-            {/* Upload modal */}
-            {showUploadModal && (
-                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-                    <div className="relative">
-                        <button
-                            onClick={() => setShowUploadModal(false)}
-                            className="absolute -top-12 right-0 text-white text-2xl hover:text-gray-300"
-                        >
-                            ✕ Close
-                        </button>
-                        <SongUpload
-                            token={token}
-                            onUploadComplete={(filename) => {
-                                console.log("Uploaded:", filename);
-                                setShowUploadModal(false);
-                                refreshLibrary();
-                            }}
-                        />
-                    </div>
-                </div>
-            )}
-
-            {/* Background effects */}
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                <div
-                    className={`absolute top-1/4 left-1/4 w-96 h-96 bg-primary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
-                        isPlaying
-                            ? "scale-150 opacity-40 animate-pulse"
-                            : "animate-pulse-slow"
-                    }`}
-                />
-                <div
-                    className={`absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
-                        isPlaying
-                            ? "scale-150 opacity-40 animate-pulse"
-                            : "animate-pulse-slow animation-delay-1000"
-                    }`}
-                />
-                {isPlaying && (
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-neon-cyan/10 rounded-full blur-3xl animate-pulse" />
-                )}
-                {isTransitioning && (
-                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-neon-cyan/20 rounded-full blur-3xl animate-pulse" />
-                )}
-            </div>
-
-            {/* Main content wrapper with responsive layout */}
+  return (
+    <div className="min-h-screen bg-gradient-dark flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      {/* Toast notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] flex flex-col items-center gap-2 pointer-events-none">
+          {toasts.map((toast) => (
             <div
-                className={`max-w-screen-2xl w-full relative z-10 flex transition-all duration-700 ease-out ${
-                    isPlaying
-                        ? "h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8"
-                        : "flex-col justify-center space-y-8"
-                }`}
+              key={toast.id}
+              className={`pointer-events-auto px-5 py-3 rounded-xl shadow-lg backdrop-blur-md text-sm font-medium animate-fade-in-down max-w-md text-center ${
+                toast.type === "error"
+                  ? "bg-red-500/90 text-white"
+                  : toast.type === "success"
+                    ? "bg-green-500/90 text-white"
+                    : "bg-white/15 text-white border border-white/20"
+              }`}
+              onClick={() =>
+                setToasts((prev) => prev.filter((t) => t.id !== toast.id))
+              }
             >
-                {/* Left sidebar: Library */}
-                {isPlaying && (
-                    <aside
-                        className={`hidden lg:flex flex-col shrink-0 transition-all duration-300 ease-in-out ${
-                            isLibraryCollapsed
-                                ? "w-10"
-                                : "w-[340px] xl:w-[360px]"
-                        }`}
-                    >
-                        <div
-                            className={`h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl overflow-hidden ${isLibraryCollapsed ? "p-0" : "p-4"}`}
-                        >
-                            {isLibraryCollapsed ? (
-                                /* Collapsed: just the expand button */
-                                <button
-                                    type="button"
-                                    onClick={() => setIsLibraryCollapsed(false)}
-                                    className="w-full h-full flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                                    title="Expand library"
-                                >
-                                    <ChevronRight className="w-6 h-6" />
-                                </button>
-                            ) : (
-                                /* Expanded: full panel */
-                                <>
-                                    <div className="flex items-center justify-between mb-3">
-                                        <div className="text-xs font-semibold tracking-widest text-gray-300">
-                                            LIBRARY
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <button
-                                                type="button"
-                                                onClick={refreshLibrary}
-                                                className="text-xs text-gray-400 hover:text-gray-200 transition-colors"
-                                            >
-                                                {libraryLoading
-                                                    ? "Loading…"
-                                                    : "Refresh"}
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() =>
-                                                    setIsLibraryCollapsed(true)
-                                                }
-                                                className="text-gray-400 hover:text-gray-200 transition-colors"
-                                                title="Collapse library"
-                                            >
-                                                <ChevronLeft className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-
-                                    {libraryError && (
-                                        <div className="text-xs text-red-300 mb-2 truncate">
-                                            {libraryError}
-                                        </div>
-                                    )}
-
-                                    <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-12rem)] pr-3 library-scroll">
-                                        {librarySongs.length === 0 &&
-                                        !libraryLoading ? (
-                                            <div className="text-sm text-gray-500">
-                                                No songs found.
-                                            </div>
-                                        ) : (
-                                            librarySongs.map(
-                                                (s: any, idx: number) => {
-                                                    const title =
-                                                        s?.title ??
-                                                        s?.name ??
-                                                        s?.song_name ??
-                                                        s?.id ??
-                                                        "Untitled";
-                                                    const artist =
-                                                        s?.artist ?? "";
-                                                    const bpm =
-                                                        typeof s?.bpm ===
-                                                        "number"
-                                                            ? Math.round(s.bpm)
-                                                            : null;
-                                                    const key = s?.key ?? "";
-                                                    const scale =
-                                                        s?.scale ?? "";
-
-                                                    const prettyPrompt = artist
-                                                        ? `play ${title} by ${artist}`
-                                                        : `play ${title}`;
-
-                                                    const keyStr =
-                                                        `${key}${scale ? ` ${scale}` : ""}`.trim();
-
-                                                    return (
-                                                        <button
-                                                            key={
-                                                                s?.id ??
-                                                                `${title}::${artist}::${idx}`
-                                                            }
-                                                            type="button"
-                                                            disabled={
-                                                                connectionStatus !==
-                                                                    "connected" ||
-                                                                loading
-                                                            }
-                                                            onClick={() =>
-                                                                handleSubmit(
-                                                                    prettyPrompt,
-                                                                )
-                                                            }
-                                                            className="w-full text-left rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-2 transition-colors disabled:opacity-50"
-                                                        >
-                                                            <div className="text-sm text-white/90 font-medium truncate">
-                                                                {title}
-                                                            </div>
-                                                            <div className="text-xs text-gray-400 truncate">
-                                                                {artist}
-                                                                {bpm
-                                                                    ? ` • ${bpm} BPM`
-                                                                    : ""}
-                                                                {keyStr
-                                                                    ? ` • ${keyStr}`
-                                                                    : ""}
-                                                            </div>
-                                                        </button>
-                                                    );
-                                                },
-                                            )
-                                        )}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    </aside>
-                )}
-
-                {/* Left column */}
-                <div
-                    className={`flex-1 relative flex flex-col transition-all duration-700 ease-out ${
-                        isPlaying ? "justify-between" : "justify-center"
-                    }`}
-                >
-                    {/* Welcome text - fades out when playing */}
-                    <div
-                        className={`text-center space-y-5 transition-all duration-500 ${
-                            isPlaying
-                                ? "opacity-0 scale-95 absolute pointer-events-none"
-                                : "opacity-100 scale-100"
-                        }`}
-                    >
-                        <h1 className="text-7xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
-                            Welcome To The Future of Music
-                        </h1>
-                        <p className="text-gray-300 text-lg font-medium">
-                            Tell me what you want to hear, and I'll mix it for
-                            you!
-                        </p>
-
-                        {/* Connection status - only show when not playing */}
-                        <div
-                            className={`flex items-center justify-center gap-2 text-sm transition-opacity duration-300 ${
-                                isPlaying ? "opacity-0" : "opacity-100"
-                            }`}
-                        >
-                            <div
-                                className={`w-2 h-2 rounded-full ${
-                                    connectionStatus === "connected"
-                                        ? "bg-green-500"
-                                        : connectionStatus === "connecting"
-                                          ? "bg-yellow-500 animate-pulse"
-                                          : "bg-red-500"
-                                }`}
-                            />
-                            <span className="text-gray-400">
-                                {connectionStatus === "connected"
-                                    ? "Connected"
-                                    : connectionStatus === "connecting"
-                                      ? "Connecting..."
-                                      : "Disconnected"}
-                            </span>
-                        </div>
-                    </div>
-
-                    {/* Music mode content - fades in when playing */}
-                    <div
-                        className={`flex-1 flex flex-col items-center justify-center transition-all duration-500 ${
-                            isPlaying
-                                ? "opacity-100 scale-100"
-                                : "opacity-0 scale-95 absolute pointer-events-none"
-                        }`}
-                    >
-                        {/* Transition info at the very top - shows upcoming mix */}
-                        <div className="w-full max-w-md mb-6">
-                            <TransitionInfo
-                                transition={pendingTransition}
-                                isTransitioning={isTransitioning}
-                                isQuickTransitionPending={
-                                    isQuickTransitionPending
-                                }
-                            />
-                        </div>
-
-                        {/* Track info */}
-                        <div className="mb-6">
-                            <TrackInfo track={currentTrack} />
-                        </div>
-
-                        {/* Waveform */}
-                        <div className="w-full max-w-2xl px-4">
-                            <Waveform
-                                analyserNode={analyserNode}
-                                isPlaying={isPlaying}
-                            />
-                        </div>
-
-                        {/* Playback timeline under the waveform */}
-                        <div className="w-full max-w-2xl px-4 mt-6">
-                            <PlaybackTimeline
-                                currentTime={currentTime}
-                                duration={duration}
-                                transitionPoints={transitionPoints}
-                            />
-                        </div>
-                    </div>
-
-                    {/* Prompt box / Controls - transitions to bottom when playing */}
-                    <div
-                        className={`w-full transition-all duration-700 ease-out ${
-                            isPlaying ? "mt-auto" : ""
-                        }`}
-                    >
-                        {/* Only show the toggle while in music mode */}
-                        {isPlaying && (
-                            <div className="w-full max-w-2xl mx-auto px-4 mb-2 flex items-center justify-center">
-                                <button
-                                    type="button"
-                                    onClick={() =>
-                                        setInputMode((m) =>
-                                            m === "prompt"
-                                                ? "controls"
-                                                : "prompt",
-                                        )
-                                    }
-                                    className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 transition"
-                                >
-                                    <span
-                                        className={
-                                            inputMode === "prompt"
-                                                ? "text-white"
-                                                : "text-white/50"
-                                        }
-                                    >
-                                        Prompt
-                                    </span>
-
-                                    <span className="relative inline-flex h-5 w-10 items-center rounded-full bg-white/10 border border-white/10">
-                                        <span
-                                            className={`inline-block h-4 w-4 rounded-full bg-white/70 transition-transform ${
-                                                inputMode === "controls"
-                                                    ? "translate-x-5"
-                                                    : "translate-x-1"
-                                            }`}
-                                        />
-                                    </span>
-
-                                    <span
-                                        className={
-                                            inputMode === "controls"
-                                                ? "text-white"
-                                                : "text-white/50"
-                                        }
-                                    >
-                                        Controls
-                                    </span>
-                                </button>
-                            </div>
-                        )}
-
-                        {/* Prompt mode */}
-                        {(!isPlaying || inputMode === "prompt") && (
-                            <div className="w-full max-w-2xl mx-auto px-4">
-                                {isListening && voicePreview && (
-                                    <div className="mb-2 text-xs text-white/60 truncate flex items-center gap-2">
-                                        <MicVocal className="w-4 h-4" />
-                                        <span>{voicePreview}</span>
-                                    </div>
-                                )}
-
-                                {!speechSupported && (
-                                    <div className="mb-2 text-xs text-white/40">
-                                        Voice input isn't supported in this
-                                        browser (works best in Chrome).
-                                    </div>
-                                )}
-
-                                <PromptBox
-                                    onSubmit={handleSubmit}
-                                    loading={loading}
-                                    disabled={connectionStatus !== "connected"}
-                                    rightAccessory={
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                isListening
-                                                    ? stopVoice()
-                                                    : startVoice()
-                                            }
-                                            disabled={
-                                                !speechSupported ||
-                                                connectionStatus !==
-                                                    "connected" ||
-                                                loading
-                                            }
-                                            className="rounded-xl bg-white/10 border border-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-2 transition-colors"
-                                            title={
-                                                speechSupported
-                                                    ? isListening
-                                                        ? "Stop voice input"
-                                                        : "Start voice input"
-                                                    : "Voice input not supported in this browser"
-                                            }
-                                            aria-label={
-                                                isListening
-                                                    ? "Stop voice input"
-                                                    : "Start voice input"
-                                            }
-                                        >
-                                            {isListening ? (
-                                                <MicOff className="w-5 h-5" />
-                                            ) : (
-                                                <Mic className="w-5 h-5" />
-                                            )}
-                                        </button>
-                                    }
-                                />
-                            </div>
-                        )}
-
-                        {/* Controls mode */}
-                        {isPlaying && inputMode === "controls" && (
-                            <div className="w-full max-w-2xl mx-auto px-4">
-                                <div className="flex items-center gap-4 rounded-2xl bg-white/5 border border-white/10 px-5 py-3 shadow-lg">
-                                    {/* Play / Pause */}
-                                    <button
-                                        type="button"
-                                        disabled={
-                                            connectionStatus !== "connected" ||
-                                            !isPlaying
-                                        }
-                                        onClick={() => {
-                                            if (isPaused) {
-                                                audioService.resume();
-                                                setIsPaused(false);
-                                            } else {
-                                                audioService.pause();
-                                                setIsPaused(true);
-                                            }
-                                        }}
-                                        className="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-                                        title={isPaused ? "Resume" : "Pause"}
-                                    >
-                                        {isPaused ? (
-                                            <Play className="w-4 h-4 ml-0.5" />
-                                        ) : (
-                                            <Pause className="w-4 h-4" />
-                                        )}
-                                    </button>
-
-                                    {/* Next (quick transition) */}
-                                    <button
-                                        type="button"
-                                        disabled={
-                                            connectionStatus !== "connected" ||
-                                            !isPlaying
-                                        }
-                                        onClick={() =>
-                                            handleSubmit("skip to next song")
-                                        }
-                                        className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
-                                        title="Skip to next song"
-                                    >
-                                        <SkipForward className="w-4 h-4" />
-                                    </button>
-
-                                    {/* Volume slider */}
-                                    <div className="flex items-center gap-2 flex-1 min-w-0">
-                                        <button
-                                            type="button"
-                                            onClick={() => {
-                                                const newVol =
-                                                    volume > 0 ? 0 : 1;
-                                                setVolume(newVol);
-                                                audioService.setVolume(newVol);
-                                            }}
-                                            className="text-white/60 hover:text-white transition-colors shrink-0 cursor-pointer"
-                                            title={
-                                                volume === 0 ? "Unmute" : "Mute"
-                                            }
-                                        >
-                                            {volume === 0 ? (
-                                                <VolumeX className="w-4 h-4" />
-                                            ) : (
-                                                <Volume2 className="w-4 h-4" />
-                                            )}
-                                        </button>
-                                        <input
-                                            type="range"
-                                            min="0"
-                                            max="1"
-                                            step="0.01"
-                                            value={volume}
-                                            onChange={(e) => {
-                                                const v = parseFloat(
-                                                    e.target.value,
-                                                );
-                                                setVolume(v);
-                                                audioService.setVolume(v);
-                                            }}
-                                            className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-primary-500 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary-400"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
-                        {isPlaying && (
-                            <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
-                                {pendingTransition
-                                    ? "Transition queued! Ask for another song to queue more"
-                                    : "Request another song to mix it in"}
-                            </p>
-                        )}
-                    </div>
-                </div>
-
-                {/* Right column: Queue / Logs panel */}
-                {isPlaying && (
-                    <aside className="w-full lg:w-[360px] flex-shrink-0 flex flex-col">
-                        <div className="h-full bg-white/5 border border-white/10 rounded-2xl backdrop-blur-xl p-4 flex flex-col">
-                            {/* Tab toggle — Logs tab only visible to dev accounts */}
-                            <div className="flex mb-3 bg-black/20 rounded-lg p-0.5 shrink-0">
-                                <button
-                                    type="button"
-                                    onClick={() => setRightPanelTab("queue")}
-                                    className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                                        rightPanelTab === "queue"
-                                            ? "bg-white/10 text-white"
-                                            : "text-white/40 hover:text-white/60"
-                                    }`}
-                                >
-                                    Queue
-                                </button>
-
-                                {/* ↓ Only rendered for dev accounts */}
-                                {isDev && (
-                                    <button
-                                        type="button"
-                                        onClick={() => setRightPanelTab("logs")}
-                                        className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-                                            rightPanelTab === "logs"
-                                                ? "bg-white/10 text-white"
-                                                : "text-white/40 hover:text-white/60"
-                                        }`}
-                                    >
-                                        Logs
-                                    </button>
-                                )}
-                            </div>
-
-                            {/* Queue view */}
-                            {rightPanelTab === "queue" && (
-                                <div className="flex-1 min-h-0 flex flex-col relative">
-                                    <div className="flex-1 min-h-0">
-                                        <QueuePanel
-                                            currentTrack={currentTrack}
-                                            previousTrack={previousTrack}
-                                            upNext={upNext}
-                                            onReorder={(newOrder) =>
-                                                audioService.sendReorderQueue(
-                                                    newOrder,
-                                                )
-                                            }
-                                            onRemove={(index) =>
-                                                audioService.sendRemoveFromQueue(
-                                                    index,
-                                                )
-                                            }
-                                        />
-                                    </div>
-
-                                    {/* EQ/Bass concept UI anchored bottom-center */}
-                                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-[270px] max-w-[calc(100%-2rem)]">
-                                        <div className="flex items-end justify-between gap-3 rounded-2xl bg-white/5 border border-white/10 px-3 py-3 backdrop-blur-xl shadow-lg w-full max-w-full overflow-hidden">
-                                            <div className="flex flex-col items-center opacity-45 w-[56px]">
-                                                <div className="text-[9px] tracking-widest text-white/35 mb-2">
-                                                    #
-                                                </div>
-                                                <div className="h-28 flex items-center justify-center overflow-hidden w-full">
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="100"
-                                                        step="1"
-                                                        value="72"
-                                                        readOnly
-                                                        tabIndex={-1}
-                                                        className="eq-placeholder-slider"
-                                                        aria-hidden="true"
-                                                    />
-                                                </div>
-                                                <div className="mt-2 text-[9px] text-white/25">
-                                                    --
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col items-center opacity-45 w-[56px]">
-                                                <div className="text-[9px] tracking-widest text-white/35 mb-2">
-                                                    #
-                                                </div>
-                                                <div className="h-28 flex items-center justify-center overflow-hidden w-full">
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="100"
-                                                        step="1"
-                                                        value="38"
-                                                        readOnly
-                                                        tabIndex={-1}
-                                                        className="eq-placeholder-slider"
-                                                        aria-hidden="true"
-                                                    />
-                                                </div>
-                                                <div className="mt-2 text-[9px] text-white/25">
-                                                    --
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col items-center rounded-xl bg-white/5 px-2 py-2 w-[64px] shrink-0">
-                                                <div className="text-[9px] tracking-widest text-white/60 mb-2">
-                                                    BASS
-                                                </div>
-
-                                                <div className="h-28 flex items-center justify-center overflow-hidden w-full">
-                                                    <input
-                                                        type="range"
-                                                        min="0"
-                                                        max="100"
-                                                        step="1"
-                                                        value={bassLevel}
-                                                        onChange={(e) => {
-                                                            const val = clamp(
-                                                                Number(
-                                                                    e.target
-                                                                        .value,
-                                                                ),
-                                                                0,
-                                                                100,
-                                                            );
-                                                            setBassLevel(val);
-                                                            setBassInput(
-                                                                String(val),
-                                                            );
-                                                        }}
-                                                        className="bass-vertical-slider"
-                                                        aria-label="Bass control"
-                                                        title="Bass control"
-                                                    />
-                                                </div>
-
-                                                <div className="mt-2 text-[9px] text-white/50 tabular-nums">
-                                                    {isEditingBass ? (
-                                                        <input
-                                                            type="number"
-                                                            value={bassInput}
-                                                            autoFocus
-                                                            min={0}
-                                                            max={100}
-                                                            onChange={(e) =>
-                                                                setBassInput(
-                                                                    e.target
-                                                                        .value,
-                                                                )
-                                                            }
-                                                            onBlur={() => {
-                                                                const val =
-                                                                    clamp(
-                                                                        Number(
-                                                                            bassInput,
-                                                                        ) || 0,
-                                                                        0,
-                                                                        100,
-                                                                    );
-                                                                setBassLevel(
-                                                                    val,
-                                                                );
-                                                                setBassInput(
-                                                                    String(val),
-                                                                );
-                                                                setIsEditingBass(
-                                                                    false,
-                                                                );
-                                                            }}
-                                                            onKeyDown={(e) => {
-                                                                if (
-                                                                    e.key ===
-                                                                    "Enter"
-                                                                ) {
-                                                                    const val =
-                                                                        clamp(
-                                                                            Number(
-                                                                                bassInput,
-                                                                            ) ||
-                                                                                0,
-                                                                            0,
-                                                                            100,
-                                                                        );
-                                                                    setBassLevel(
-                                                                        val,
-                                                                    );
-                                                                    setBassInput(
-                                                                        String(
-                                                                            val,
-                                                                        ),
-                                                                    );
-                                                                    setIsEditingBass(
-                                                                        false,
-                                                                    );
-                                                                }
-                                                            }}
-                                                            className="w-10 bg-black/40 border border-white/10 rounded text-center text-white outline-none"
-                                                        />
-                                                    ) : (
-                                                        <button
-                                                            type="button"
-                                                            onClick={() =>
-                                                                setIsEditingBass(
-                                                                    true,
-                                                                )
-                                                            }
-                                                            className="hover:text-white transition"
-                                                        >
-                                                            {bassLevel}%
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Logs view — only reachable by dev accounts */}
-                            {rightPanelTab === "logs" && isDev && (
-                                <div className="flex-1 min-h-0 flex flex-col">
-                                    <div className="flex-1 overflow-y-auto library-scroll rounded-lg bg-black/30 border border-white/5 p-3 font-mono text-[11px] leading-relaxed text-white/60">
-                                        {backendLogs.length === 0 ? (
-                                            <p className="text-white/20 italic">
-                                                No logs yet...
-                                            </p>
-                                        ) : (
-                                            backendLogs.map((line, i) => (
-                                                <div
-                                                    key={i}
-                                                    className={`py-0.5 ${
-                                                        line.includes(
-                                                            "ERROR",
-                                                        ) ||
-                                                        line.includes("Error")
-                                                            ? "text-red-400"
-                                                            : line.includes(
-                                                                    "[WS]",
-                                                                )
-                                                              ? "text-neon-cyan/70"
-                                                              : line.includes(
-                                                                      "[QUEUE]",
-                                                                  )
-                                                                ? "text-neon-green/70"
-                                                                : line.includes(
-                                                                        "[TRANSITION]",
-                                                                    ) ||
-                                                                    line.includes(
-                                                                        "[DEBUG]",
-                                                                    )
-                                                                  ? "text-neon-purple/70"
-                                                                  : ""
-                                                    }`}
-                                                >
-                                                    {line}
-                                                </div>
-                                            ))
-                                        )}
-                                        <div ref={logEndRef} />
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </aside>
-                )}
+              {toast.message}
             </div>
+          ))}
         </div>
-    );
+      )}
+
+      {isDev && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 backdrop-blur-md shadow-lg pointer-events-none select-none">
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="text-[11px] font-semibold tracking-widest text-amber-300 uppercase">
+            Admin
+          </span>
+          {user?.username && (
+            <span className="text-[11px] text-amber-400/70 ml-0.5">
+              · {user.username}
+            </span>
+          )}
+        </div>
+      )}
+
+      <RemotePairingModal
+        isOpen={showRemoteModal}
+        pairingUrl={remotePairingUrl}
+        expiresAt={remotePairingExpiresAt}
+        isLoading={isRemotePairingLoading}
+        onClose={handleCloseRemoteModal}
+      />
+
+      {/* User account icon */}
+      <div ref={guestMenuRef} className="absolute top-4 left-4 z-20">
+        <button
+          onClick={handleAccountButtonClick}
+          title={
+            isAuthenticated
+              ? `Signed in as ${user?.username}`
+              : "Guest mode - open sign in options"
+          }
+          aria-expanded={!isAuthenticated && showGuestLoginMenu}
+          aria-haspopup={!isAuthenticated ? "menu" : undefined}
+          className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+            isAuthenticated
+              ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+              : "bg-white/10 border border-white/15 hover:bg-white/15 hover:border-white/25 cursor-pointer"
+          }`}
+        >
+          <UserCircle className="w-5 h-5 text-white/80" />
+        </button>
+
+        {!isAuthenticated && showGuestLoginMenu && (
+          <div className="mt-3 w-44 rounded-2xl border border-white/10 bg-[#120922]/95 p-3 shadow-2xl backdrop-blur-xl">
+            <p className="text-[11px] uppercase tracking-[0.24em] text-white/40">
+              Guest Mode
+            </p>
+            <button
+              type="button"
+              onClick={handleGuestLoginClick}
+              className="mt-3 w-full rounded-xl bg-primary-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-500 cursor-pointer flex items-center justify-center gap-2"
+            >
+              <LogIn className="w-4 h-4" />
+              Log In
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleOpenRemoteModal}
+          disabled={connectionStatus !== "connected"}
+          className="px-4 py-2 bg-white/10 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-50 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg border border-white/10"
+        >
+          <QrCode className="h-4 w-4" />
+          Remote Control
+        </button>
+
+        <button
+          onClick={() => setShowUploadModal(true)}
+          className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white rounded-lg flex items-center gap-2 transition-colors shadow-lg"
+        >
+          <Upload className="w-v h-4" />
+          Upload Song
+        </button>
+      </div>
+      {/* ← ADD UPLOAD MODAL */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="relative">
+            <button
+              onClick={() => setShowUploadModal(false)}
+              className="absolute -top-12 right-0 text-white text-2xl hover:text-gray-300"
+            >
+              ✕ Close
+            </button>
+            <SongUpload
+              token={token}
+              onUploadComplete={(filename) => {
+                console.log("Uploaded:", filename);
+                setShowUploadModal(false);
+                refreshLibrary();
+              }}
+            />
+          </div>
+        </div>
+      )}
+      {/* Background effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div
+          className={`absolute top-1/4 left-1/4 w-96 h-96 bg-primary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
+            isPlaying
+              ? "scale-150 opacity-40 animate-pulse"
+              : "animate-pulse-slow"
+          }`}
+        />
+        <div
+          className={`absolute bottom-1/4 right-1/4 w-96 h-96 bg-secondary-600/20 rounded-full blur-3xl transition-all duration-1000 ${
+            isPlaying
+              ? "scale-150 opacity-40 animate-pulse"
+              : "animate-pulse-slow animation-delay-1000"
+          }`}
+        />
+        {isPlaying && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-neon-cyan/10 rounded-full blur-3xl animate-pulse" />
+        )}
+        {isTransitioning && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-neon-cyan/20 rounded-full blur-3xl animate-pulse" />
+        )}
+      </div>
+
+      {/* Main content wrapper with responsive layout */}
+      <div
+        className={`max-w-screen-2xl w-full relative z-10 flex transition-all duration-700 ease-out ${
+          isPlaying
+            ? "h-[calc(100vh-2rem)] flex-col lg:flex-row items-stretch gap-6 py-8"
+            : "flex-col justify-center space-y-8"
+        }`}
+      >
+        {/* Left sidebar: Library */}
+        {isPlaying && (
+          <LibrarySidebar
+            isCollapsed={isLibraryCollapsed}
+            librarySongs={librarySongs}
+            libraryLoading={libraryLoading}
+            libraryError={libraryError}
+            disabled={connectionStatus !== "connected" || loading}
+            onRefresh={refreshLibrary}
+            onCollapse={collapseLibrary}
+            onExpand={expandLibrary}
+            onSelectSong={handleLibrarySongSelect}
+          />
+        )}
+        {/* Left column */}
+        <div
+          className={`flex-1 relative flex flex-col transition-all duration-700 ease-out ${
+            isPlaying ? "justify-between" : "justify-center"
+          }`}
+        >
+          {/* Welcome text - fades out when playing */}
+          <div
+            className={`text-center space-y-5 transition-all duration-500 ${
+              isPlaying
+                ? "opacity-0 scale-95 absolute pointer-events-none"
+                : "opacity-100 scale-100"
+            }`}
+          >
+            <h1 className="text-7xl font-display font-black bg-gradient-music bg-clip-text text-transparent drop-shadow-2xl">
+              Welcome To The Future of Music
+            </h1>
+            <p className="text-gray-300 text-lg font-medium">
+              Tell me what you want to hear, and I'll mix it for you!
+            </p>
+
+            {/* Connection status - only show when not playing */}
+            <div
+              className={`flex items-center justify-center gap-2 text-sm transition-opacity duration-300 ${
+                isPlaying ? "opacity-0" : "opacity-100"
+              }`}
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  connectionStatus === "connected"
+                    ? "bg-green-500"
+                    : connectionStatus === "connecting"
+                      ? "bg-yellow-500 animate-pulse"
+                      : "bg-red-500"
+                }`}
+              />
+              <span className="text-gray-400">
+                {connectionStatus === "connected"
+                  ? "Connected"
+                  : connectionStatus === "connecting"
+                    ? "Connecting..."
+                    : "Disconnected"}
+              </span>
+            </div>
+
+          </div>
+
+          {/* Music mode content - fades in when playing */}
+          <div
+            className={`flex-1 flex flex-col items-center justify-center transition-all duration-500 ${
+              isPlaying
+                ? "opacity-100 scale-100"
+                : "opacity-0 scale-95 absolute pointer-events-none"
+            }`}
+          >
+            {/* Transition info at the very top - shows upcoming mix */}
+            <div className="w-full max-w-md mb-6">
+              <TransitionInfo
+                transition={pendingTransition}
+                isTransitioning={isTransitioning}
+                isQuickTransitionPending={isQuickTransitionPending}
+              />
+            </div>
+
+            {/* Track info */}
+            <div className="mb-6">
+              <TrackInfo track={currentTrack} />
+            </div>
+
+            {/* Waveform */}
+            <div className="w-full max-w-2xl px-4">
+              <Waveform analyserNode={analyserNode} isPlaying={isPlaying} />
+            </div>
+
+            {/* Playback timeline under the waveform */}
+            <div className="w-full max-w-2xl px-4 mt-6">
+              <PlaybackTimeline
+                currentTime={currentTime}
+                duration={duration}
+                transitionPoints={transitionPoints}
+              />
+            </div>
+          </div>
+
+          {/* Prompt box / Controls - transitions to bottom when playing */}
+          <div
+            className={`w-full transition-all duration-700 ease-out ${
+              isPlaying ? "mt-auto" : ""
+            }`}
+          >
+            {/* Only show the toggle while in music mode */}
+            {isPlaying && (
+              <div className="w-full max-w-2xl mx-auto px-4 mb-2 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setInputMode((m) =>
+                      m === "prompt" ? "controls" : "prompt",
+                    )
+                  }
+                  className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 transition"
+                >
+                  <span
+                    className={
+                      inputMode === "prompt" ? "text-white" : "text-white/50"
+                    }
+                  >
+                    Prompt
+                  </span>
+
+                  <span className="relative inline-flex h-5 w-10 items-center rounded-full bg-white/10 border border-white/10">
+                    <span
+                      className={`inline-block h-4 w-4 rounded-full bg-white/70 transition-transform ${
+                        inputMode === "controls"
+                          ? "translate-x-5"
+                          : "translate-x-1"
+                      }`}
+                    />
+                  </span>
+
+                  <span
+                    className={
+                      inputMode === "controls" ? "text-white" : "text-white/50"
+                    }
+                  >
+                    Controls
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* Prompt mode */}
+            {(!isPlaying || inputMode === "prompt") && (
+              <div className="w-full max-w-2xl mx-auto px-4">
+                {isListening && voicePreview && (
+                  <div className="mb-2 text-xs text-white/60 truncate flex items-center gap-2">
+                    <MicVocal className="w-4 h-4" />
+                    <span>{voicePreview}</span>
+                  </div>
+                )}
+
+                {!speechSupported && (
+                  <div className="mb-2 text-xs text-white/40">
+                    Voice input isn’t supported in this browser (works best in
+                    Chrome).
+                  </div>
+                )}
+
+                <PromptBox
+                  onSubmit={handleSubmit}
+                  loading={loading}
+                  disabled={connectionStatus !== "connected"}
+                  rightAccessory={
+                    <button
+                      type="button"
+                      onClick={() => (isListening ? stopVoice() : startVoice())}
+                      disabled={
+                        !speechSupported ||
+                        connectionStatus !== "connected" ||
+                        loading
+                      }
+                      className="rounded-xl bg-white/10 border border-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-2 transition-colors"
+                      title={
+                        speechSupported
+                          ? isListening
+                            ? "Stop voice input"
+                            : "Start voice input"
+                          : "Voice input not supported in this browser"
+                      }
+                      aria-label={
+                        isListening ? "Stop voice input" : "Start voice input"
+                      }
+                    >
+                      {isListening ? (
+                        <MicOff className="w-5 h-5" />
+                      ) : (
+                        <Mic className="w-5 h-5" />
+                      )}
+                    </button>
+                  }
+                />
+              </div>
+            )}
+
+            {/* Controls mode */}
+            {isPlaying && inputMode === "controls" && (
+              <div className="w-full max-w-2xl mx-auto px-4">
+                <div className="flex items-center gap-4 rounded-2xl bg-white/5 border border-white/10 px-5 py-3 shadow-lg">
+                  {/* Play / Pause */}
+                  <button
+                    type="button"
+                    disabled={connectionStatus !== "connected" || !isPlaying}
+                    onClick={() => {
+                      if (isPaused) {
+                        audioService.resume();
+                        setIsPaused(false);
+                      } else {
+                        audioService.pause();
+                        setIsPaused(true);
+                      }
+                    }}
+                    className="w-10 h-10 rounded-full bg-primary-600 hover:bg-primary-700 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+                    title={isPaused ? "Resume" : "Pause"}
+                  >
+                    {isPaused ? (
+                      <Play className="w-4 h-4 ml-0.5" />
+                    ) : (
+                      <Pause className="w-4 h-4" />
+                    )}
+                  </button>
+
+                  {/* Next (quick transition) */}
+                  <button
+                    type="button"
+                    disabled={connectionStatus !== "connected" || !isPlaying}
+                    onClick={handleQuickTransition}
+                    className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-50 text-white flex items-center justify-center transition-colors shrink-0 cursor-pointer"
+                    title="Skip to next song"
+                  >
+                    <SkipForward className="w-4 h-4" />
+                  </button>
+
+                  {/* Volume slider */}
+                  <VolumeControl
+                    volume={volume}
+                    onVolumeChange={(v) => {
+                      setVolume(v);
+                      audioService.setVolume(v);
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {isPlaying && (
+              <p className="text-center text-gray-500 text-sm mt-3 animate-fade-in">
+                {pendingTransition
+                  ? "Transition queued! Ask for another song to queue more"
+                  : "Request another song to mix it in"}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Right column: full queue */}
+        {isPlaying && (
+          <RightPanel
+            rightPanelTab={rightPanelTab}
+            onTabChange={handleRightPanelTabChange}
+            showLogsTab={isDev}
+            currentTrack={currentTrack}
+            previousTrack={previousTrack}
+            upNext={upNext}
+            onReorder={handleQueueReorder}
+            onRemove={handleQueueRemove}
+            backendLogs={deferredBackendLogs}
+            bassLevel={bassLevel}
+            bassAngle={bassAngle}
+            isEditingBass={isEditingBass}
+            bassInput={bassInput}
+            onBassInputChange={handleBassInputChange}
+            onBassInputCommit={commitBassInput}
+            onBassInputKeyDown={handleBassInputKeyDown}
+            onBassEditStart={startBassEditing}
+            onKnobPointerDown={onKnobPointerDown}
+            onKnobPointerMove={onKnobPointerMove}
+            onKnobPointerUp={onKnobPointerUp}
+          />
+        )}
+      </div>
+    </div>
+  );
 }

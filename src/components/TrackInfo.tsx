@@ -1,4 +1,4 @@
-// src/components/TrackInfo.tsx
+import { memo } from 'react';
 import type { TrackInfo as TrackInfoType } from '../services/audioStream';
 
 type Props = {
@@ -24,7 +24,7 @@ function formatTitle(raw: string): string {
     .join(' ');
 }
 
-export default function TrackInfo({ track }: Props) {
+function TrackInfo({ track }: Props) {
   if (!track) return null;
 
   const displayTitle = formatTitle(track.title);
@@ -51,3 +51,5 @@ export default function TrackInfo({ track }: Props) {
     </div>
   );
 }
+
+export default memo(TrackInfo);
