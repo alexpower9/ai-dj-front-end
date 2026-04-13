@@ -27,6 +27,7 @@ import {
     ShieldCheck,
 } from "lucide-react";
 import SongUpload from "../components/SongUpload.tsx";
+import DJHelpButton from "../components/DJHelpButton.tsx";
 import { useAuth } from "../context/AuthContext";
 
 type LibrarySong = {
@@ -800,22 +801,26 @@ export default function Home() {
                 </div>
             )}
 
-            {/* User account icon */}
-            <button
-                onClick={() => isAuthenticated && navigate("/account")}
-                title={
-                    isAuthenticated
-                        ? `Signed in as ${user?.username}`
-                        : "Guest — sign in to access your account"
-                }
-                className={`absolute top-4 left-4 z-20 w-10 h-10 rounded-full flex items-center justify-center transition-all ${
-                    isAuthenticated
-                        ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
-                        : "bg-white/5 border border-white/10 opacity-50 cursor-default"
-                }`}
-            >
-                <UserCircle className="w-5 h-5 text-white/80" />
-            </button>
+            {/* User account + help */}
+            <div className="absolute top-4 left-4 z-20 flex items-start gap-2">
+                <button
+                    onClick={() => isAuthenticated && navigate("/account")}
+                    title={
+                        isAuthenticated
+                            ? `Signed in as ${user?.username}`
+                            : "Guest — sign in to access your account"
+                    }
+                    className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                        isAuthenticated
+                            ? "bg-primary-600/30 border border-primary-500/50 hover:bg-primary-600/50 hover:shadow-neon-purple cursor-pointer"
+                            : "bg-white/5 border border-white/10 opacity-50 cursor-default"
+                    }`}
+                >
+                    <UserCircle className="w-5 h-5 text-white/80" />
+                </button>
+
+                <DJHelpButton />
+            </div>
 
             {/* Add Upload Button */}
             <button
