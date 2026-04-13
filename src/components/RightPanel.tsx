@@ -8,6 +8,7 @@ type RightPanelTab = 'queue' | 'logs';
 type Props = {
   rightPanelTab: RightPanelTab;
   onTabChange: (tab: RightPanelTab) => void;
+  showLogsTab?: boolean;
   currentTrack: TrackInfoType | null;
   previousTrack: TrackInfoType | null;
   upNext: TrackInfoType[];
@@ -40,6 +41,7 @@ function getLogLineClass(line: string) {
 function RightPanel({
   rightPanelTab,
   onTabChange,
+  showLogsTab = true,
   currentTrack,
   previousTrack,
   upNext,
@@ -59,13 +61,14 @@ function RightPanel({
   onKnobPointerUp,
 }: Props) {
   const logContainerRef = useRef<HTMLDivElement>(null);
+  const activeTab = showLogsTab ? rightPanelTab : 'queue';
 
   useEffect(() => {
-    if (rightPanelTab !== 'logs') return;
+    if (activeTab !== 'logs') return;
     const container = logContainerRef.current;
     if (!container) return;
     container.scrollTop = container.scrollHeight;
-  }, [backendLogs.length, rightPanelTab]);
+  }, [activeTab, backendLogs.length]);
 
   return (
     <aside className="w-full lg:w-[360px] flex-shrink-0 flex flex-col">
@@ -75,27 +78,29 @@ function RightPanel({
             type="button"
             onClick={() => onTabChange('queue')}
             className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-              rightPanelTab === 'queue'
+              activeTab === 'queue'
                 ? 'bg-white/10 text-white'
                 : 'text-white/40 hover:text-white/60'
             }`}
           >
             Queue
           </button>
-          <button
-            type="button"
-            onClick={() => onTabChange('logs')}
-            className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
-              rightPanelTab === 'logs'
-                ? 'bg-white/10 text-white'
-                : 'text-white/40 hover:text-white/60'
-            }`}
-          >
-            Logs
-          </button>
+          {showLogsTab && (
+            <button
+              type="button"
+              onClick={() => onTabChange('logs')}
+              className={`flex-1 py-1.5 text-[10px] uppercase tracking-widest font-medium rounded-md transition-all cursor-pointer ${
+                activeTab === 'logs'
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/40 hover:text-white/60'
+              }`}
+            >
+              Logs
+            </button>
+          )}
         </div>
 
-        {rightPanelTab === 'queue' && (
+        {activeTab === 'queue' && (
           <div className="flex-1 min-h-0 flex flex-col relative">
             <div className="flex-1 min-h-0">
               <QueuePanel
@@ -164,7 +169,7 @@ function RightPanel({
           </div>
         )}
 
-        {rightPanelTab === 'logs' && (
+        {activeTab === 'logs' && showLogsTab && (
           <div className="flex-1 min-h-0 flex flex-col">
             <div
               ref={logContainerRef}

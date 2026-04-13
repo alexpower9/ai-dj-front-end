@@ -20,6 +20,7 @@ import {
     MicOff,
     QrCode,
     LogIn,
+    ShieldCheck,
     UserCircle,
     Play,
     Pause,
@@ -44,7 +45,7 @@ const clamp = (value: number, min: number, max: number) =>
 export default function Home() {
     const navigate = useNavigate();
     const location = useLocation();
-    const { isAuthenticated, token, user } = useAuth();
+    const { isAuthenticated, token, user, isDev } = useAuth();
     const [audioService] = useState(() => new AudioStreamService());
     const [loading, setLoading] = useState(false);
     const guestMenuRef = useRef<HTMLDivElement | null>(null);
@@ -873,6 +874,20 @@ export default function Home() {
         </div>
       )}
 
+      {isDev && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-amber-500/15 border border-amber-400/30 backdrop-blur-md shadow-lg pointer-events-none select-none">
+          <ShieldCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <span className="text-[11px] font-semibold tracking-widest text-amber-300 uppercase">
+            Admin
+          </span>
+          {user?.username && (
+            <span className="text-[11px] text-amber-400/70 ml-0.5">
+              · {user.username}
+            </span>
+          )}
+        </div>
+      )}
+
       <RemotePairingModal
         isOpen={showRemoteModal}
         pairingUrl={remotePairingUrl}
@@ -1253,6 +1268,7 @@ export default function Home() {
           <RightPanel
             rightPanelTab={rightPanelTab}
             onTabChange={handleRightPanelTabChange}
+            showLogsTab={isDev}
             currentTrack={currentTrack}
             previousTrack={previousTrack}
             upNext={upNext}
