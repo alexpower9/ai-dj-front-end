@@ -76,9 +76,14 @@ export class AudioStreamService {
     private analyserNode: AnalyserNode | null = null;
     private gainNode: GainNode | null = null;
 
-    // Bass (low-shelf) filter
-    private bassFilterNode: BiquadFilterNode | null = null;
-    private bassValue: number = 50; // 0..100 (50 = neutral)
+    // EQ filters
+    private bassFilterNode: BiquadFilterNode | null = null;   // lowshelf
+    private eqFilterNode: BiquadFilterNode | null = null;     // peaking (mid)
+    private trebleFilterNode: BiquadFilterNode | null = null; // highshelf
+
+    private bassValue: number = 50;   // 0..100 (50 = neutral)
+    private eqValue: number = 50;     // 0..100 (50 = neutral)
+    private trebleValue: number = 50; // 0..100 (50 = neutral)
 
     private sampleRate: number = 44100;
 
@@ -203,17 +208,33 @@ export class AudioStreamService {
             this.analyserNode.fftSize = 256;
             this.analyserNode.smoothingTimeConstant = 0.8;
 
-            // Bass filter (low-shelf) before analyser -> gain -> destination
+            // EQ chain: bass -> mid EQ -> treble -> analyser -> gain -> destination
             this.bassFilterNode = this.audioContext.createBiquadFilter();
             this.bassFilterNode.type = "lowshelf";
             this.bassFilterNode.frequency.value = 180; // Hz
 
-            // Apply current bass value (0..100 => -12..+12 dB, 50 = 0 dB)
-            const gainDb = ((this.bassValue - 50) / 50) * 12;
-            this.bassFilterNode.gain.value = gainDb;
+            this.eqFilterNode = this.audioContext.createBiquadFilter();
+            this.eqFilterNode.type = "peaking";
+            this.eqFilterNode.frequency.value = 1000; // Hz
+            this.eqFilterNode.Q.value = 0.9;
 
-            // Wire: bassFilter -> analyser -> gain -> destination
-            this.bassFilterNode.connect(this.analyserNode);
+            this.trebleFilterNode = this.audioContext.createBiquadFilter();
+            this.trebleFilterNode.type = "highshelf";
+            this.trebleFilterNode.frequency.value = 6000; // Hz
+
+            // Apply current values (0..100 => dB ranges, 50 = 0 dB)
+            const bassDb = ((this.bassValue - 50) / 50) * 12;      // -12..+12
+            const eqDb = ((this.eqValue - 50) / 50) * 10;          // -10..+10
+            const trebleDb = ((this.trebleValue - 50) / 50) * 12;  // -12..+12
+
+            this.bassFilterNode.gain.value = bassDb;
+            this.eqFilterNode.gain.value = eqDb;
+            this.trebleFilterNode.gain.value = trebleDb;
+
+            // Wire chain
+            this.bassFilterNode.connect(this.eqFilterNode);
+            this.eqFilterNode.connect(this.trebleFilterNode);
+            this.trebleFilterNode.connect(this.analyserNode);
             this.analyserNode.connect(this.gainNode);
 
             console.log("🎵 Audio context and analyser initialized");
@@ -954,7 +975,7 @@ export class AudioStreamService {
             source.buffer = audioBuffer;
 
             if (this.bassFilterNode) {
-                // Route: source -> bassFilter -> analyser -> gain -> destination
+                // Route: source -> bass -> eq -> treble -> analyser -> gain -> destination
                 source.connect(this.bassFilterNode);
             } else if (this.analyserNode) {
                 source.connect(this.analyserNode);
@@ -1118,7 +1139,8 @@ export class AudioStreamService {
             this.gainNode.gain.value = Math.max(0, Math.min(1, value));
         }
     }
-        setBass(value: number): void {
+
+    setBass(value: number): void {
         const clamped = Math.max(0, Math.min(100, value));
         this.bassValue = clamped;
 
@@ -1132,6 +1154,42 @@ export class AudioStreamService {
                 this.bassFilterNode.gain.setTargetAtTime(gainDb, now, 0.03);
             } catch {
                 this.bassFilterNode.gain.value = gainDb;
+            }
+        }
+    }
+
+    setEq(value: number): void {
+        const clamped = Math.max(0, Math.min(100, value));
+        this.eqValue = clamped;
+
+        // Map 0..100 => -10..+10 dB (50 = 0 dB)
+        const gainDb = ((clamped - 50) / 50) * 10;
+
+        if (this.eqFilterNode) {
+            const now = this.audioContext?.currentTime ?? 0;
+            try {
+                this.eqFilterNode.gain.cancelScheduledValues(now);
+                this.eqFilterNode.gain.setTargetAtTime(gainDb, now, 0.03);
+            } catch {
+                this.eqFilterNode.gain.value = gainDb;
+            }
+        }
+    }
+
+    setTreble(value: number): void {
+        const clamped = Math.max(0, Math.min(100, value));
+        this.trebleValue = clamped;
+
+        // Map 0..100 => -12..+12 dB (50 = 0 dB)
+        const gainDb = ((clamped - 50) / 50) * 12;
+
+        if (this.trebleFilterNode) {
+            const now = this.audioContext?.currentTime ?? 0;
+            try {
+                this.trebleFilterNode.gain.cancelScheduledValues(now);
+                this.trebleFilterNode.gain.setTargetAtTime(gainDb, now, 0.03);
+            } catch {
+                this.trebleFilterNode.gain.value = gainDb;
             }
         }
     }
@@ -1160,6 +1218,9 @@ export class AudioStreamService {
             this.audioContext = null;
             this.analyserNode = null;
             this.gainNode = null;
+            this.bassFilterNode = null;
+            this.eqFilterNode = null;
+            this.trebleFilterNode = null;
         }
 
         if (this.ws) {
