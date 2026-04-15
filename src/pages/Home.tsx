@@ -221,15 +221,86 @@ export default function Home() {
   >([]);
   const toastIdRef = useRef(0);
 
-  // EQ / Bass UI (frontend concept only)
+  // EQ / Bass UI
   const [bassLevel, setBassLevel] = useState(50); // 0..100
-  const knobDragRef = useRef<{ startY: number; startValue: number } | null>(
-    null,
-  );
+  const [eqLevel, setEqLevel] = useState(50); // 0..100
+  const [trebleLevel, setTrebleLevel] = useState(50); // 0..100
   const [isEditingBass, setIsEditingBass] = useState(false);
-  const [bassInput, setBassInput] = useState(String(bassLevel));
+  const [bassInput, setBassInput] = useState(String(50));
 
-  // Push bass UI value into WebAudio (client-side) whenever it changes
+  // Knob angle (visual) maps 0..100 to -135..135 degrees
+  const levelToAngle = useCallback((level: number) => {
+    const clamped = clamp(level, 0, 100);
+    return -135 + (clamped / 100) * 270;
+  }, []);
+
+  const [bassAngle, setBassAngle] = useState(() => levelToAngle(50));
+
+  const handleBassLevelChange = useCallback(
+    (value: number) => {
+      const val = clamp(Math.round(value), 0, 100);
+      setBassLevel(val);
+      setBassInput(String(val));
+      setBassAngle(levelToAngle(val));
+    },
+    [levelToAngle],
+  );
+
+  const handleEqLevelChange = useCallback((value: number) => {
+    const val = clamp(Math.round(value), 0, 100);
+    setEqLevel(val);
+  }, []);
+
+  const handleTrebleLevelChange = useCallback((value: number) => {
+    const val = clamp(Math.round(value), 0, 100);
+    setTrebleLevel(val);
+  }, []);
+
+  // Pointer-drag support for the knob in RightPanel
+  const knobDragRef = useRef<{
+    dragging: boolean;
+    startY: number;
+    startLevel: number;
+  }>({ dragging: false, startY: 0, startLevel: 50 });
+
+  const onKnobPointerDown = useCallback(
+    (event: React.PointerEvent) => {
+      // Stop text selection / scroll while dragging
+      event.preventDefault();
+      event.stopPropagation();
+
+      // If user clicks the knob, exit the inline % editor
+      setIsEditingBass(false);
+
+      knobDragRef.current.dragging = true;
+      knobDragRef.current.startY = event.clientY;
+      knobDragRef.current.startLevel = bassLevel;
+
+      try {
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+      } catch {
+        // ignore
+      }
+    },
+    [bassLevel],
+  );
+
+  const onKnobPointerMove = useCallback((event: React.PointerEvent) => {
+    if (!knobDragRef.current.dragging) return;
+
+    // Drag up increases level, drag down decreases
+    const deltaY = knobDragRef.current.startY - event.clientY;
+
+    // Tune sensitivity here (px -> %). 2px ~= 1%
+    const next = knobDragRef.current.startLevel + deltaY / 2;
+    handleBassLevelChange(next);
+  }, [handleBassLevelChange]);
+
+  const onKnobPointerUp = useCallback(() => {
+    knobDragRef.current.dragging = false;
+  }, []);
+
+  // Push EQ/Bass/Treble UI values into WebAudio (client-side) whenever they change
   useEffect(() => {
     try {
       (audioService as any).setBass?.(bassLevel);
@@ -238,40 +309,22 @@ export default function Home() {
     }
   }, [bassLevel, audioService]);
 
-  // Map 0..100 => -135deg .. +135deg (classic knob sweep)
-  const bassAngle = -135 + (bassLevel / 100) * 270;
+  useEffect(() => {
+    try {
+      (audioService as any).setEQ?.(eqLevel);
+    } catch (e) {
+      console.warn("setEQ failed:", e);
+    }
+  }, [eqLevel, audioService]);
 
-  const onKnobPointerDown = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      e.preventDefault();
-      try {
-        (e.currentTarget as any).setPointerCapture?.(e.pointerId);
-      } catch {
-        // ignore
-      }
-      knobDragRef.current = { startY: e.clientY, startValue: bassLevel };
-    },
-    [bassLevel],
-  );
+  useEffect(() => {
+    try {
+      (audioService as any).setTreble?.(trebleLevel);
+    } catch (e) {
+      console.warn("setTreble failed:", e);
+    }
+  }, [trebleLevel, audioService]);
 
-  const onKnobPointerMove = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      e.preventDefault();
-      if (!knobDragRef.current) return;
-
-      const deltaY = knobDragRef.current.startY - e.clientY;
-      const next = knobDragRef.current.startValue + deltaY * 0.35;
-      const clampedVal = clamp(Math.round(next), 0, 100);
-
-      setBassLevel(clampedVal);
-      setBassInput(String(clampedVal));
-    },
-    [],
-  );
-
-  const onKnobPointerUp = useCallback(() => {
-    knobDragRef.current = null;
-  }, []);
 
   const addToast = useCallback(
     (message: string, type: "error" | "info" | "success" = "info") => {
@@ -831,10 +884,9 @@ export default function Home() {
 
   const commitBassInput = useCallback(() => {
     const val = clamp(Number(bassInput) || 0, 0, 100);
-    setBassLevel(val);
-    setBassInput(String(val));
+    handleBassLevelChange(val);
     setIsEditingBass(false);
-  }, [bassInput]);
+  }, [bassInput, handleBassLevelChange]);
 
   const handleBassInputKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -846,6 +898,8 @@ export default function Home() {
   );
 
   const startBassEditing = useCallback(() => {
+    // Stop dragging if user switches to typing
+    knobDragRef.current.dragging = false;
     setIsEditingBass(true);
   }, []);
 
@@ -1227,7 +1281,7 @@ export default function Home() {
                         connectionStatus !== "connected" ||
                         loading
                       }
-                      className="rounded-xl bg-white/10 border border-white/10 hover:bg-white/20 disabled:opacity-50 text-white p-2 transition-colors"
+                      className="rounded-xl bg-gradient-purple-blue hover:shadow-neon-purple transition-all disabled:opacity-50 text-white p-2"
                       title={
                         speechSupported
                           ? isListening
@@ -1333,6 +1387,11 @@ export default function Home() {
             onKnobPointerDown={onKnobPointerDown}
             onKnobPointerMove={onKnobPointerMove}
             onKnobPointerUp={onKnobPointerUp}
+            eqLevel={eqLevel}
+            trebleLevel={trebleLevel}
+            onBassLevelChange={handleBassLevelChange}
+            onEqLevelChange={handleEqLevelChange}
+            onTrebleLevelChange={handleTrebleLevelChange}
           />
         )}
       </div>
